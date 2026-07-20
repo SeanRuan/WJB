@@ -45,6 +45,11 @@
 - 先在 feature branch 開發，再合併回主線
 - 不要把 `.env`、`node_modules`、`dist` 推上去
 
+## 交接文件
+
+- [CONTRIBUTING.md](CONTRIBUTING.md)
+- [RELEASE_NOTES.md](RELEASE_NOTES.md)
+
 ## Scripts
 
 - `npm run start:dev` 開發模式
