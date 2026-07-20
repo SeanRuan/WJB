@@ -52,6 +52,16 @@
 - 如果朋友要本機執行，請他先 `git clone`，再依照這份 README 的快速啟動步驟設定 `.env`
 - 如果你只想分享最新版本，先確認 `main` 已經 `git push` 到 GitHub
 
+可直接貼給朋友：
+
+```
+我把專案放在 GitHub 了：
+https://github.com/SeanRuan/WJB
+
+如果你只是想看程式碼，直接開連結就行。
+如果要本機跑，先 git clone，再照 README 建立 .env、npm install、npm run prisma:generate、npm run start:dev。
+```
+
 ## 交接文件
 
 - [HANDOFF.md](HANDOFF.md)
