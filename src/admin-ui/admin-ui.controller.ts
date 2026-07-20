@@ -107,6 +107,28 @@ export class AdminUiController {
     .guide-panel li + li {
       margin-top: 8px;
     }
+    .subsection {
+      margin-top: 18px;
+      padding-top: 14px;
+      border-top: 1px solid var(--line);
+    }
+    .subsection:first-child {
+      margin-top: 0;
+      padding-top: 0;
+      border-top: 0;
+    }
+    .subsection-title {
+      margin: 0;
+      font-size: 15px;
+      font-weight: 800;
+      letter-spacing: 0.02em;
+    }
+    .subsection-copy {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+    }
     label {
       display: block;
       font-size: 13px;
@@ -399,6 +421,31 @@ export class AdminUiController {
       <div class="card section">
         <div class="section-head">
           <div>
+            <h2>後台帳號 / 權限</h2>
+            <p>這裡看的是後台管理員，不是遊戲玩家。方便確認 owner / manager / support 分工。</p>
+          </div>
+          <div class="btns" style="margin:0">
+            <button class="ghost compact" id="refreshAdminUsers">重新整理</button>
+          </div>
+        </div>
+        <div style="overflow:auto">
+          <table>
+            <thead>
+              <tr>
+                <th>帳號</th>
+                <th>角色 / 狀態</th>
+                <th>建立時間</th>
+              </tr>
+            </thead>
+            <tbody id="adminUsersBody"></tbody>
+          </table>
+        </div>
+        <div class="detail-card" id="adminUserDetail">點選上方管理員可查看細節</div>
+      </div>
+
+      <div class="card section">
+        <div class="section-head">
+          <div>
             <h2>核帳管理</h2>
             <p>查看待核帳訂單，manager / owner 可核准或駁回。</p>
           </div>
@@ -510,7 +557,7 @@ export class AdminUiController {
         <div class="section-head">
           <div>
             <h2>公會管理</h2>
-            <p>建立、編輯、拆散與成員異動都從這裡進。</p>
+            <p>把「建立 / 編修 / 註銷 / 歷史 / 成員」拆開看，避免全部擠在一起。</p>
           </div>
           <div class="btns" style="margin:0">
             <button class="ghost compact" id="refreshGuilds">重新整理公會</button>
@@ -519,6 +566,10 @@ export class AdminUiController {
         </div>
         <div class="split">
           <div>
+            <div class="subsection">
+              <h3 class="subsection-title">公會申請建立 / 編修 / 註銷</h3>
+              <p class="subsection-copy">所有寫入先走申請，等主管核准後才真正套用到公會資料。</p>
+            </div>
             <div class="row row-2">
               <div>
                 <label for="guildRequestType">申請類型</label>
@@ -565,6 +616,10 @@ export class AdminUiController {
             <div class="footer-note">建立 / 編輯 / 拆散都先走申請；核准後才真正套用。</div>
           </div>
           <div>
+            <div class="subsection">
+              <h3 class="subsection-title">現有公會清單 / 成員操作</h3>
+              <p class="subsection-copy">先查公會，再決定要查看成員、改角色或移出成員。</p>
+            </div>
             <div class="row row-2">
               <div>
                 <label for="guildSearch">公會關鍵字</label>
@@ -612,6 +667,10 @@ export class AdminUiController {
           </div>
         </div>
         <div style="height:14px"></div>
+        <div class="subsection">
+          <h3 class="subsection-title">公會申請歷史</h3>
+          <p class="subsection-copy">這裡看待審、已核准、已駁回的申請紀錄，方便回頭追查。</p>
+        </div>
         <div class="row row-2" style="margin-bottom:12px">
           <div>
             <label for="guildRequestFilterType">申請類型篩選</label>
@@ -652,6 +711,10 @@ export class AdminUiController {
             </div>
           </div>
           <div>
+            <div class="subsection" style="margin-bottom:12px">
+              <h3 class="subsection-title">現有公會清單</h3>
+              <p class="subsection-copy">點選「查看」後，下方會切到該公會的成員與細節。</p>
+            </div>
             <div style="overflow:auto">
               <table>
                 <thead>
@@ -667,6 +730,10 @@ export class AdminUiController {
           </div>
         </div>
         <div style="height:14px"></div>
+        <div class="subsection">
+          <h3 class="subsection-title">成員 / 公會細節</h3>
+          <p class="subsection-copy">這裡是單一公會的成員名單、角色、狀態與參考值設定。</p>
+        </div>
         <div style="overflow:auto">
           <table>
             <thead>
@@ -712,7 +779,9 @@ export class AdminUiController {
     const modeText = document.getElementById('modeText');
     const metrics = document.getElementById('metrics');
     const playersBody = document.getElementById('playersBody');
+    const adminUsersBody = document.getElementById('adminUsersBody');
     const summaryBox = document.getElementById('summaryBox');
+    const adminUserDetail = document.getElementById('adminUserDetail');
     const auditBox = document.getElementById('auditBox');
     const rechargeOrdersBody = document.getElementById('rechargeOrdersBody');
     const rechargeOrderDetail = document.getElementById('rechargeOrderDetail');
@@ -735,7 +804,9 @@ export class AdminUiController {
     const guildRequestFilterStatus = document.getElementById('guildRequestFilterStatus');
     const readonlyMode = ${isReadonlyMode ? 'true' : 'false'};
     let lastRechargeOrders = [];
+    let lastAdminUsers = [];
     let selectedRechargeOrderId = null;
+    let selectedAdminUserId = null;
     let lastRoomCardLogs = [];
     let selectedRoomCardLogId = null;
     let lastGuilds = [];
@@ -847,6 +918,44 @@ export class AdminUiController {
         selectedRechargeOrderId = null;
         rechargeOrderDetail.textContent = '點選上方任一核帳單可查看詳情';
       }
+    }
+
+    function renderAdminUsers(adminUsers) {
+      lastAdminUsers = adminUsers;
+      adminUsersBody.innerHTML = adminUsers.map((adminUser) => {
+        const selectedClass = adminUser.id === selectedAdminUserId
+          ? ' style="background: rgba(96, 165, 250, 0.12);"'
+          : '';
+        return '<tr data-admin-user-id="' + adminUser.id + '"' + selectedClass + '>' +
+          '<td><strong>' + adminUser.displayName + '</strong><br><span class="muted">' + adminUser.email + '</span></td>' +
+          '<td><span class="pill ' + (adminUser.isActive ? 'active' : 'banned') + '">' + adminUser.role + '</span><br><span class="muted">' + (adminUser.isActive ? 'active' : 'disabled') + '</span></td>' +
+          '<td>' + (adminUser.createdAt ? new Date(adminUser.createdAt).toLocaleString('zh-TW') : '-') + '</td>' +
+          '</tr>';
+      }).join('') || '<tr><td colspan="3" class="muted">沒有管理員資料</td></tr>';
+
+      const selectedAdmin = adminUsers.find((adminUser) => adminUser.id === selectedAdminUserId) ?? adminUsers[0] ?? null;
+      if (selectedAdmin) {
+        selectedAdminUserId = selectedAdmin.id;
+      }
+      renderAdminUserDetail(selectedAdmin);
+    }
+
+    function renderAdminUserDetail(adminUser) {
+      if (!adminUser) {
+        adminUserDetail.textContent = '點選上方管理員可查看細節';
+        return;
+      }
+
+      const lines = [
+        '姓名：' + adminUser.displayName,
+        '帳號：' + adminUser.email,
+        '角色：' + adminUser.role,
+        '狀態：' + (adminUser.isActive ? 'active' : 'disabled'),
+        '建立時間：' + (adminUser.createdAt ? new Date(adminUser.createdAt).toLocaleString('zh-TW') : '-'),
+        '更新時間：' + (adminUser.updatedAt ? new Date(adminUser.updatedAt).toLocaleString('zh-TW') : '-'),
+      ];
+
+      adminUserDetail.textContent = lines.join('\n');
     }
 
     function renderRechargeOrderDetail(order) {
@@ -1062,6 +1171,11 @@ export class AdminUiController {
       modeText.textContent = '已登入後台';
     }
 
+    async function loadAdminUsers() {
+      const adminUsers = await api('/api/admin-users');
+      renderAdminUsers(adminUsers);
+    }
+
     async function loadPlayers() {
       const search = document.getElementById('playerSearch').value.trim();
       const status = document.getElementById('playerStatus').value.trim();
@@ -1154,7 +1268,7 @@ export class AdminUiController {
 
     async function refreshAll() {
       try {
-        await Promise.all([loadSummary(), loadPlayers(), loadRechargeOrders(), loadRoomCards(), loadGuildRequests(), loadGuilds()]);
+        await Promise.all([loadSummary(), loadAdminUsers(), loadPlayers(), loadRechargeOrders(), loadRoomCards(), loadGuildRequests(), loadGuilds()]);
       } catch (error) {
         authNote.textContent = '載入失敗：' + error.message;
       }
@@ -1363,6 +1477,7 @@ export class AdminUiController {
     });
 
     document.getElementById('refreshSummary').addEventListener('click', refreshAll);
+    document.getElementById('refreshAdminUsers').addEventListener('click', loadAdminUsers);
     document.getElementById('refreshPlayers').addEventListener('click', loadPlayers);
     document.getElementById('playerSearch').addEventListener('input', () => {
       clearTimeout(playerSearchTimer);
@@ -1422,6 +1537,21 @@ export class AdminUiController {
       if (playerId && nextStatus) {
         toggleStatus(playerId, nextStatus);
       }
+    });
+    adminUsersBody.addEventListener('click', (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) {
+        return;
+      }
+
+      const row = target.closest('[data-admin-user-id]');
+      const adminUserId = row?.getAttribute('data-admin-user-id');
+      if (!adminUserId) {
+        return;
+      }
+
+      selectedAdminUserId = adminUserId;
+      renderAdminUsers(lastAdminUsers);
     });
     guildRequestsBody.addEventListener('click', (event) => {
       const target = event.target;
