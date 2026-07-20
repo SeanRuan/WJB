@@ -479,6 +479,7 @@ export class AdminUiController {
             <button class="ghost compact" id="refreshAdminUsers">重新整理</button>
           </div>
         </div>
+        <div class="footer-note" id="adminUsersMeta">尚未載入管理員摘要</div>
         <div style="overflow:auto">
           <table>
             <thead>
@@ -831,6 +832,7 @@ export class AdminUiController {
     const metrics = document.getElementById('metrics');
     const playersBody = document.getElementById('playersBody');
     const adminUsersBody = document.getElementById('adminUsersBody');
+    const adminUsersMeta = document.getElementById('adminUsersMeta');
     const summaryBox = document.getElementById('summaryBox');
     const summaryHighlights = document.getElementById('summaryHighlights');
     const adminUserDetail = document.getElementById('adminUserDetail');
@@ -859,6 +861,7 @@ export class AdminUiController {
     let lastAdminUsers = [];
     let selectedRechargeOrderId = null;
     let selectedAdminUserId = null;
+    let currentAdminUserId = null;
     let lastRoomCardLogs = [];
     let selectedRoomCardLogId = null;
     let lastGuilds = [];
@@ -992,18 +995,35 @@ export class AdminUiController {
 
     function renderAdminUsers(adminUsers) {
       lastAdminUsers = adminUsers;
+      const roleCounts = adminUsers.reduce((acc, adminUser) => {
+        acc[adminUser.role] = (acc[adminUser.role] || 0) + 1;
+        return acc;
+      }, {});
+      const roleSummary = Object.entries(roleCounts)
+        .map(([role, count]) => role + ' ' + count)
+        .join(' / ') || '無';
+      adminUsersMeta.textContent =
+        '目前共 ' + adminUsers.length + ' 位管理員；角色分布：' + roleSummary +
+        (currentAdminUserId ? '；已自動定位目前登入帳號' : '');
+
       adminUsersBody.innerHTML = adminUsers.map((adminUser) => {
-        const selectedClass = adminUser.id === selectedAdminUserId
+        const isSelected = adminUser.id === selectedAdminUserId;
+        const isCurrent = adminUser.id === currentAdminUserId;
+        const selectedClass = isSelected
           ? ' style="background: rgba(96, 165, 250, 0.12);"'
           : '';
         return '<tr data-admin-user-id="' + adminUser.id + '"' + selectedClass + '>' +
-          '<td><strong>' + adminUser.displayName + '</strong><br><span class="muted">' + adminUser.email + '</span></td>' +
+          '<td><strong>' + adminUser.displayName + '</strong>' + (isCurrent ? '<br><span class="muted">目前登入</span>' : '') + '<br><span class="muted">' + adminUser.email + '</span></td>' +
           '<td><span class="pill ' + (adminUser.isActive ? 'active' : 'banned') + '">' + adminUser.role + '</span><br><span class="muted">' + (adminUser.isActive ? 'active' : 'disabled') + '</span></td>' +
           '<td>' + (adminUser.createdAt ? new Date(adminUser.createdAt).toLocaleString('zh-TW') : '-') + '</td>' +
           '</tr>';
       }).join('') || '<tr><td colspan="3" class="muted">沒有管理員資料</td></tr>';
 
-      const selectedAdmin = adminUsers.find((adminUser) => adminUser.id === selectedAdminUserId) ?? adminUsers[0] ?? null;
+      const selectedAdmin =
+        adminUsers.find((adminUser) => adminUser.id === selectedAdminUserId) ??
+        adminUsers.find((adminUser) => adminUser.id === currentAdminUserId) ??
+        adminUsers[0] ??
+        null;
       if (selectedAdmin) {
         selectedAdminUserId = selectedAdmin.id;
       }
@@ -1017,6 +1037,7 @@ export class AdminUiController {
       }
 
       const lines = [
+        '目前登入：' + (adminUser.id === currentAdminUserId ? '是' : '否'),
         '姓名：' + adminUser.displayName,
         '帳號：' + adminUser.email,
         '角色：' + adminUser.role,
@@ -1242,7 +1263,11 @@ export class AdminUiController {
     }
 
     async function loadAdminUsers() {
-      const adminUsers = await api('/api/admin-users');
+      const [adminUsers, currentAdmin] = await Promise.all([
+        api('/api/admin-users'),
+        api('/api/admin-users/me'),
+      ]);
+      currentAdminUserId = currentAdmin?.id || null;
       renderAdminUsers(adminUsers);
     }
 
