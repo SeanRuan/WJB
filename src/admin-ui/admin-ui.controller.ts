@@ -195,6 +195,17 @@ export class AdminUiController {
       grid-template-columns: repeat(4, minmax(0, 1fr));
       margin: 18px 0;
     }
+    .quick-nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin: 18px 0 0;
+    }
+    .quick-nav button {
+      background: rgba(96, 165, 250, 0.12);
+      color: var(--text);
+      border: 1px solid rgba(96, 165, 250, 0.22);
+    }
     .metric {
       padding: 18px;
       min-height: 118px;
@@ -307,6 +318,34 @@ export class AdminUiController {
       color: #e2e8f0;
       line-height: 1.6;
     }
+    .summary-grid {
+      display: grid;
+      grid-template-columns: 1.2fr 0.8fr;
+      gap: 14px;
+      margin-top: 14px;
+    }
+    .summary-list {
+      display: grid;
+      gap: 10px;
+    }
+    .summary-item {
+      padding: 12px 14px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: rgba(15, 23, 42, 0.52);
+    }
+    .summary-item strong {
+      display: block;
+      font-size: 13px;
+      letter-spacing: 0.02em;
+    }
+    .summary-item span {
+      display: block;
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+    }
     .footer-note {
       margin-top: 14px;
       font-size: 12px;
@@ -361,10 +400,19 @@ export class AdminUiController {
 
     ${isReadonlyMode ? '<div class="card section" style="border-color: rgba(248, 113, 113, 0.35); background: rgba(127, 29, 29, 0.22);"><strong>目前是 readonly 觀察模式</strong><div class="muted" style="margin-top:8px">核准、駁回與房卡調整會被後端拒絕。你仍可查詢資料、檢視摘要與稽核紀錄。</div></div>' : ''}
 
+    <div class="quick-nav">
+      <button class="compact" data-section-jump="summarySection">總覽</button>
+      <button class="compact" data-section-jump="playersSection">玩家</button>
+      <button class="compact" data-section-jump="adminUsersSection">後台帳號</button>
+      <button class="compact" data-section-jump="rechargeSection">核帳</button>
+      <button class="compact" data-section-jump="roomCardsSection">房卡</button>
+      <button class="compact" data-section-jump="guildSection">公會</button>
+    </div>
+
     <div class="grid" id="metrics"></div>
 
     <div class="section-stack">
-      <div class="card section">
+      <div class="card section" id="summarySection">
         <div class="section-head">
           <div>
             <h2>摘要 / 稽核</h2>
@@ -374,12 +422,15 @@ export class AdminUiController {
             <button class="ghost compact" id="refreshSummary">重新整理</button>
           </div>
         </div>
-        <div class="output" id="summaryBox">尚未載入</div>
+        <div class="summary-grid">
+          <div class="output" id="summaryBox">尚未載入</div>
+          <div class="summary-list" id="summaryHighlights"></div>
+        </div>
         <div style="height:14px"></div>
         <div id="auditBox"></div>
       </div>
 
-      <div class="card section">
+      <div class="card section" id="playersSection">
         <div class="section-head">
           <div>
             <h2>玩家查詢</h2>
@@ -418,7 +469,7 @@ export class AdminUiController {
         </div>
       </div>
 
-      <div class="card section">
+      <div class="card section" id="adminUsersSection">
         <div class="section-head">
           <div>
             <h2>後台帳號 / 權限</h2>
@@ -443,7 +494,7 @@ export class AdminUiController {
         <div class="detail-card" id="adminUserDetail">點選上方管理員可查看細節</div>
       </div>
 
-      <div class="card section">
+      <div class="card section" id="rechargeSection">
         <div class="section-head">
           <div>
             <h2>核帳管理</h2>
@@ -484,7 +535,7 @@ export class AdminUiController {
         <div class="detail-card" id="rechargeOrderDetail">點選上方任一核帳單可查看詳情</div>
       </div>
 
-      <div class="card section">
+      <div class="card section" id="roomCardsSection">
         <div class="section-head">
           <div>
             <h2>房卡管理</h2>
@@ -553,7 +604,7 @@ export class AdminUiController {
         <div class="detail-card" id="roomCardLogDetail">點選下方房卡異動紀錄可查看詳情</div>
       </div>
 
-      <div class="card section">
+      <div class="card section" id="guildSection">
         <div class="section-head">
           <div>
             <h2>公會管理</h2>
@@ -781,6 +832,7 @@ export class AdminUiController {
     const playersBody = document.getElementById('playersBody');
     const adminUsersBody = document.getElementById('adminUsersBody');
     const summaryBox = document.getElementById('summaryBox');
+    const summaryHighlights = document.getElementById('summaryHighlights');
     const adminUserDetail = document.getElementById('adminUserDetail');
     const auditBox = document.getElementById('auditBox');
     const rechargeOrdersBody = document.getElementById('rechargeOrdersBody');
@@ -860,7 +912,25 @@ export class AdminUiController {
           '</div>';
       }).join('');
 
-      summaryBox.textContent = JSON.stringify(summary, null, 2);
+      const overviewLines = [
+        '目前資料來源：' + (summary.legacyChange?.capturedAt ? '已載入總覽資料' : 'mock / safe-dev 觀察模式'),
+        '目前重點：玩家 ' + summary.totals.players + ' 人、待核帳 ' + summary.totals.pendingRechargeOrders + ' 筆、房卡總餘額 ' + summary.totals.roomCardBalance,
+        '管理員：owner / manager / support 共 ' + summary.totals.adminUsers + ' 人',
+        '舊後台異動：' + (legacyChanged ? '有變更' : '目前無明顯變更'),
+        '建議操作順序：先看稽核，再查玩家，再處理核帳、公會與房卡。',
+      ];
+
+      summaryBox.textContent = overviewLines.join('\n');
+      summaryHighlights.innerHTML = [
+        ['資料來源', readonlyMode ? '目前以 readonly / mock 展示為主，適合看流程與版面。' : '目前可進一步操作寫入流程。'],
+        ['舊後台監測', '快照時間：' + legacyCapturedAt + '；異動表：' + legacyChangedTables],
+        ['展示重點', '朋友看後台時，先看摘要、玩家、公會，再補核帳與房卡。'],
+      ].map(([label, value]) => {
+        return '<div class="summary-item">' +
+          '<strong>' + label + '</strong>' +
+          '<span>' + value + '</span>' +
+          '</div>';
+      }).join('');
     }
 
     function renderAuditLogs(logs) {
@@ -1477,6 +1547,15 @@ export class AdminUiController {
     });
 
     document.getElementById('refreshSummary').addEventListener('click', refreshAll);
+    document.querySelectorAll('[data-section-jump]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const sectionId = button.getAttribute('data-section-jump');
+        const section = sectionId ? document.getElementById(sectionId) : null;
+        if (section) {
+          section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      });
+    });
     document.getElementById('refreshAdminUsers').addEventListener('click', loadAdminUsers);
     document.getElementById('refreshPlayers').addEventListener('click', loadPlayers);
     document.getElementById('playerSearch').addEventListener('input', () => {
