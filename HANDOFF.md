@@ -22,6 +22,20 @@
 - `RELEASE_CHECKLIST.md` for release steps.
 - `RELEASE_NOTES.md` for version summary.
 
+## Project structure
+- `src/` main NestJS application code.
+- `prisma/` schema and database models.
+- `docs/` decision notes and workflow docs.
+- `scripts/` local helper scripts.
+- `.github/` PR and issue templates.
+
+## First touch order
+1. Read `README.md`.
+2. Read `HANDOFF.md`.
+3. Check `CONTRIBUTING.md` and `BRANCHING.md`.
+4. Run `npm run check`.
+5. Run `npm run build`.
+
 ## Useful commands
 - `npm run start:dev`
 - `npm run build`
