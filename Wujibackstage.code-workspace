@@ -1,0 +1,67 @@
+{
+  "folders": [
+    {
+      "path": "."
+    }
+  ],
+  "settings": {
+    // File behavior
+    "files.eol": "\n",
+    "files.insertFinalNewline": true,
+    "files.trimFinalNewlines": true,
+    "files.trimTrailingWhitespace": true,
+
+    // Explorer / project organization
+    "explorer.compactFolders": false,
+    "explorer.sortOrder": "type",
+    "explorer.fileNesting.enabled": true,
+    "explorer.fileNesting.patterns": {
+      "package.json": "package-lock.json,.npmrc",
+      "tsconfig.json": "tsconfig.build.json",
+      ".env": ".env.example,.env.local,.env.development,.env.production"
+    },
+
+    // Hidden from explorer
+    "files.exclude": {
+      "**/dist": true,
+      "**/node_modules": true,
+      "**/.git": true
+    },
+
+    // Hidden from search
+    "search.exclude": {
+      "**/dist": true,
+      "**/node_modules": true,
+      "**/.git": true
+    },
+
+    // Editor defaults
+    "files.autoSave": "afterDelay",
+    "files.autoSaveDelay": 800,
+    "editor.formatOnSave": true,
+    "editor.formatOnPaste": true,
+    "editor.codeActionsOnSave": {
+      "source.organizeImports": "always",
+      "source.fixAll.eslint": "explicit"
+    },
+
+    // Local single-user ergonomics
+    "workbench.startupEditor": "none",
+    "terminal.integrated.defaultProfile.windows": "PowerShell",
+    "git.autofetch": true,
+
+    // TypeScript / NestJS
+    "typescript.tsdk": "node_modules/typescript/lib"
+  },
+  "extensions": {
+    "recommendations": [
+      "dbaeumer.vscode-eslint",
+      "esbenp.prettier-vscode",
+      "Prisma.prisma"
+    ]
+  },
+  "launch": {
+    "version": "0.2.0",
+    "configurations": []
+  }
+}

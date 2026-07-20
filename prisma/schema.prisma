@@ -1,0 +1,277 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlserver"
+  url      = env("DATABASE_URL")
+}
+
+// role 三層權限：owner（老闆/總經理，全權） | manager（部門主管，營運操作 + 審核）|
+// support（客服，日常查詢與公會成員加入/移出，不可核准需審核的異動）。
+model AdminUser {
+  id                      String                 @id @default(cuid())
+  email                   String                 @unique
+  displayName             String
+  passwordHash            String
+  role                    String // owner | manager | support
+  isActive                Boolean                @default(true)
+  createdAt               DateTime               @default(now())
+  updatedAt               DateTime               @updatedAt
+  auditLogs               AuditLog[]
+  requestedGuildApprovals GuildApprovalRequest[] @relation("GuildApprovalRequestedBy")
+  reviewedGuildApprovals  GuildApprovalRequest[] @relation("GuildApprovalReviewedBy")
+  submittedRechargeOrders RechargeOrder[]        @relation("RechargeOrderSubmittedBy")
+  reviewedRechargeOrders  RechargeOrder[]        @relation("RechargeOrderReviewedBy")
+}
+
+model Player {
+  id                      String                   @id @default(cuid())
+  externalId              String                   @unique
+  nickname                String
+  status                  String                   @default("active") // active | banned
+  coinBalance             BigInt                   @default(0) // 遊戲內免費籌碼餘額（唯讀同步自遊戲端）。本平台不販售遊戲幣，此欄位僅供顯示參考。
+  createdAt               DateTime                 @default(now())
+  updatedAt               DateTime                 @updatedAt
+  auditLogs               AuditLog[]
+  roomCardBalance         RoomCardBalance?
+  roomCardLogs            RoomCardLog[]
+  guildMemberships        GuildMember[]
+  hostedTables            Table[]                  @relation("TableHost")
+  rechargeOrders          RechargeOrder[]
+  guildScoreReferenceLogs GuildScoreReferenceLog[]
+}
+
+model AuditLog {
+  id          String     @id @default(cuid())
+  action      String
+  entityName  String
+  entityId    String
+  summary     String
+  metadata    String?
+  createdAt   DateTime   @default(now())
+  adminUserId String?
+  playerId    String?
+  adminUser   AdminUser? @relation(fields: [adminUserId], references: [id])
+  player      Player?    @relation(fields: [playerId], references: [id])
+
+  @@index([entityName, entityId])
+  @@index([createdAt])
+}
+
+// =============================================================================
+// 房卡 (Room Card) — 平台唯一的實際課金商品。
+//
+// 業務模式（比照旅館出租房間）：平台只收「房間使用費」（房卡），玩家進場使用的
+// 遊戲幣一律免費核發、不販售、不可兌現；玩家輸贏的感覺與私下計算，均與平台無關。
+//
+// 法遵防呆原則（依台灣刑法第 266-270 條賭博罪相關實務見解整理，非正式法律意見，
+// 正式上線前務必請律師覆核）：
+//   1. 房卡只能被「消耗」（開桌 / 入桌），系統中不得新增任何「房卡或積分換算
+//      現金」的欄位或功能。
+//   2. 若房卡因故失效需處理庫存，比照業界慣例做「虛擬轉虛擬」補償，不做現金退款。
+//   3. 公會內部積分/趴數僅為房主與成員私下約定的參考數字，系統只負責「列出來
+//      方便他們核對」，後台一律唯讀，不提供代為結算、代收代付等功能。
+//   4. 遊戲幣（coinBalance）一律免費核發、不販售，任何模組都不得新增「幣換現金」
+//      或「幣可購買」的欄位/功能。
+// =============================================================================
+
+model RoomCardBalance {
+  id        String   @id @default(cuid())
+  playerId  String   @unique
+  balance   Int      @default(0)
+  updatedAt DateTime @updatedAt
+  player    Player   @relation(fields: [playerId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+// 房卡異動稽核紀錄：所有房卡增減都必須留痕，不得直接修改 RoomCardBalance。
+model RoomCardLog {
+  id                     String         @id @default(cuid())
+  playerId               String
+  changeAmount           Int
+  balanceAfter           Int
+  sourceType             String // recharge | open_table | join_table | admin_adjust | compensation_convert
+  relatedTableId         String?
+  relatedRechargeOrderId String? // sourceType = recharge 時，對應核准的儲值訂單
+  adminUserId            String?
+  note                   String?
+  createdAt              DateTime       @default(now())
+  player                 Player         @relation(fields: [playerId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  table                  Table?         @relation(fields: [relatedTableId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  rechargeOrder          RechargeOrder? @relation(fields: [relatedRechargeOrderId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([playerId, createdAt])
+  @@index([sourceType])
+}
+
+// =============================================================================
+// 儲值訂單（房卡購買）— 平台唯一課金商品「房卡」的購買核帳紀錄。
+//
+// 現行流程（方案 3，手動匯款，無事前登記）：
+//   1. 玩家自行匯款，無需事前在後台登記；會計/客服事後比對銀行明細與玩家提供
+//      的資訊（匯款帳號後五碼、金額、時間、憑證），手動登記一筆 RechargeOrder，
+//      status = pending，此時尚未加房卡。
+//   2. manager 以上核准後，系統才將 roomCardAmount 加進 RoomCardBalance，
+//      並產生一筆 RoomCardLog（sourceType = recharge，relatedRechargeOrderId 指回本單）
+//      留下完整鏈路；核駁則 status = rejected，只記 reviewNote，不加房卡。
+//   3. paymentChannel 保留 manual_transfer / linepay 兩種值，供未來串接 LinePay
+//      （目標方案 2）時沿用同一張表；手動匯款屆時仍保留作為備援管道。
+//
+// amount 為玩家自由匯款金額（無固定方案），roomCardAmount 由核帳人員依當下換算
+// 規則填入，非系統自動換算。
+// =============================================================================
+
+model RechargeOrder {
+  id                 String        @id @default(cuid())
+  playerId           String
+  amount             Int // 玩家實際匯款金額（TWD）
+  currency           String        @default("TWD")
+  roomCardAmount     Int // 核帳後應加的房卡數
+  paymentChannel     String        @default("manual_transfer") // manual_transfer | linepay（保留，尚未開放）
+  bankAccountLast5   String? // 玩家匯款帳號後五碼，供會計核帳比對
+  transferredAt      DateTime? // 玩家匯款時間（若可得知）
+  proofNote          String? // 憑證說明或截圖路徑
+  status             String        @default("pending") // pending | confirmed | rejected
+  submittedByAdminId String // 登記核帳資料的客服/會計
+  reviewedByAdminId  String?
+  reviewNote         String?
+  createdAt          DateTime      @default(now())
+  reviewedAt         DateTime?
+  player             Player        @relation(fields: [playerId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  submittedByAdmin   AdminUser     @relation("RechargeOrderSubmittedBy", fields: [submittedByAdminId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  reviewedByAdmin    AdminUser?    @relation("RechargeOrderReviewedBy", fields: [reviewedByAdminId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  roomCardLogs       RoomCardLog[]
+
+  @@index([status])
+  @@index([playerId, createdAt])
+}
+
+// =============================================================================
+// 公會 (Guild) — 比照「租房間」模式：平台只收房卡（房間使用費），公會內部的
+// 趴數/積分是房主與參與者私下的約定，系統只負責「列出來方便他們自己核對」，
+// 不代表平台執行任何金錢結算、代收代付或拆帳。
+//
+// 命名原則：欄位一律使用「Reference（參考）」而非「Rake/Settlement（抽水/結算）」，
+// 避免讓人誤以為平台有參與金錢計算。
+// =============================================================================
+
+model Guild {
+  id                        String                   @id @default(cuid())
+  name                      String
+  selfTouchReferenceRate    Int                      @default(0) // 自摸參考趴數，房主與成員私下核對用
+  selfTouchReferenceVisible Boolean                  @default(false) // 是否於牌桌顯示此參考數字
+  winReferenceRate          Int                      @default(0) // 胡牌參考趴數，房主與成員私下核對用
+  winReferenceVisible       Boolean                  @default(false) // 是否於牌桌顯示此參考數字
+  status                    String                   @default("active") // active | revoked
+  creationMethod            String                   @default("customer_service") // customer_service | self_apply（保留，尚未開放）
+  createdByAdminId          String? // 實際核准建立此公會的管理員（manager/owner），非提出申請的客服
+  createdAt                 DateTime                 @default(now())
+  updatedAt                 DateTime                 @updatedAt
+  members                   GuildMember[]
+  tables                    Table[]
+  scoreReferenceLogs        GuildScoreReferenceLog[]
+  approvalRequests          GuildApprovalRequest[]
+}
+
+// 本版本遊戲沒有玩家自助申請入會機制，公會成員的加入/移出完全由後台客服
+// （role = support 即可操作）手動維護，非讀取遊戲端同步資料。
+model GuildMember {
+  id       String   @id @default(cuid())
+  guildId  String
+  playerId String
+  role     String   @default("member") // member | master：純粹是客服用來標記「目前對接窗口（公會主本人）」的顯示標籤，非系統權限
+  status   String   @default("active")
+  joinedAt DateTime @default(now())
+  guild    Guild    @relation(fields: [guildId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  player   Player   @relation(fields: [playerId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([guildId, playerId])
+}
+
+// =============================================================================
+// 公會審核流程 — 因公會的存續與參考趴數屬於較敏感的營運決策，設計為「客服提出、
+// 主管以上（manager/owner）覆核」的雙軌流程：
+//   1. support 送出申請（建立公會 / 停用公會 / 調整參考趴數），狀態為 pending，
+//      此時尚未套用到 Guild 實際資料。
+//   2. manager/owner 登入後台時可查詢 status=pending 的清單（作為「被通知」的方式，
+//      不需額外的即時推播機制，維持流程單純順暢）。
+//   3. 核准後才將 payload 內容套用到 Guild，並於 AuditLog 記錄「support 提出 →
+//      manager/owner 核准」的完整鏈路；駁回則不套用，僅記錄 reviewNote。
+// =============================================================================
+
+model GuildApprovalRequest {
+  id                 String     @id @default(cuid())
+  requestType        String // create_guild | revoke_guild | update_reference_rate
+  guildId            String? // create_guild 時為 null，其餘操作對應既有公會
+  payload            String // JSON 字串，記錄申請的異動內容（例如公會名稱、趴數設定）
+  status             String     @default("pending") // pending | approved | rejected
+  requestedByAdminId String
+  reviewedByAdminId  String?
+  reviewNote         String?
+  createdAt          DateTime   @default(now())
+  reviewedAt         DateTime?
+  guild              Guild?     @relation(fields: [guildId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  requestedByAdmin   AdminUser  @relation("GuildApprovalRequestedBy", fields: [requestedByAdminId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  reviewedByAdmin    AdminUser? @relation("GuildApprovalReviewedBy", fields: [reviewedByAdminId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([status])
+  @@index([guildId])
+}
+
+// 公會積分參考紀錄：純粹是遊戲結果的分數紀錄（像記分板），資料來源為遊戲端寫入，
+// 後台一律唯讀查詢，僅供房主/成員自行核對之用。
+// 平台不執行任何結算動作、不代收代付、不做積分換算現金 —
+// recordedBy = admin_manual 為保留欄位（尚未開放，且未來若開放也僅限「補登分數紀錄」，
+// 絕不可延伸為金錢結算功能）。
+model GuildScoreReferenceLog {
+  id            String   @id @default(cuid())
+  guildId       String
+  playerId      String
+  recordBatchId String
+  taiCount      Int      @default(0) // 台數，對應遊戲結算畫面的台數欄位，方便核對得分換算
+  scoreChange   Int
+  recordedBy    String   @default("system") // system | admin_manual（保留，尚未開放）
+  createdAt     DateTime @default(now())
+  guild         Guild    @relation(fields: [guildId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  player        Player   @relation(fields: [playerId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([guildId, createdAt])
+  @@index([recordBatchId])
+}
+
+// =============================================================================
+// 牌桌 (Table) — 對應兩種開桌路徑：
+//   - 非公會：guildId = null，靠 roomNumber 分享房號加入。
+//   - 公會：guildId 有值，靠公會牌桌列表加入。
+// paymentMode 於開桌時由房主設定：host_pays（房主全付）或 per_player（每人自付/AA付）。
+//
+// 以下欄位對應遊戲端實際「開桌設定」畫面，後台需能查到每桌完整設定供客服查詢：
+// baseScore（底分）、shuffleTimeLimitSeconds（洗牌時間限制）、
+// flowerTilePongAllowed（花牌可否碰牌）、gameRecordVisible（查看牌局紀錄）、
+// roundCount（圈數：1/2/4）、passwordProtected（是否需密碼，密碼一律存 hash，不存明碼）、
+// roomCardCost（開桌消耗房卡數）。
+// =============================================================================
+
+model Table {
+  id                      String        @id @default(cuid())
+  roomNumber              String        @unique // 非公會開桌使用的房號
+  guildId                 String? // null = 非公會桌
+  hostPlayerId            String
+  paymentMode             String        @default("per_player") // per_player | host_pays
+  baseScore               Int           @default(0) // 底分
+  shuffleTimeLimitSeconds Int           @default(0) // 洗牌時間限制（秒）
+  flowerTilePongAllowed   Boolean       @default(false) // 花牌可否碰牌
+  gameRecordVisible       Boolean       @default(false) // 是否開放查看牌局紀錄
+  roundCount              Int           @default(1) // 圈數：1 | 2 | 4
+  passwordProtected       Boolean       @default(false) // 是否需要密碼
+  passwordHash            String? // 需密碼時存 hash，絕不存明碼
+  roomCardCost            Int           @default(1) // 開桌消耗房卡數
+  status                  String        @default("open") // open | playing | closed
+  createdAt               DateTime      @default(now())
+  closedAt                DateTime?
+  guild                   Guild?        @relation(fields: [guildId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  hostPlayer              Player        @relation("TableHost", fields: [hostPlayerId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  roomCardLogs            RoomCardLog[]
+
+  @@index([guildId])
+}
