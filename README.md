@@ -1,47 +1,54 @@
 # Wujibackstage
 
-Mahjong game admin backend scaffolded for a separate new back office, using NestJS, Prisma, and SQL Server.
+新後台後端專案，使用 NestJS + Prisma + SQL Server。
 
-## Safety first
+## 目前定位
 
-- Do not connect this project to the live production database while the existing back office is still operating.
-- Use a development or staging MSSQL copy, or a read-only account against a safe replica.
-- Keep the first phase limited to read-only features such as player lookup, audit lookup, and internal verification.
+- 先做客服與營運會用到的核心功能
+- 先以可查詢、可追蹤、可控風險為主
+- 寫入功能預設受 `DATABASE_ACCESS_MODE=readonly` 保護
 
-## Quick start
+## 主要功能
 
-1. Copy `.env.example` to `.env`
-2. Run `npm install`
-3. Keep `DATA_SOURCE=mock` to run safely without MSSQL during early backend/frontend development
-4. Run `npm run prisma:generate`
-5. Run `npm run start:dev`
+- 玩家查詢與狀態管理
+- 儲值核帳
+- 房卡餘額與異動查詢
+- Legacy 異動追蹤
+- 公會建立、編輯、拆散與成員管理
+- 後台稽核紀錄
 
-## Switch to MSSQL later
+## 快速啟動
 
-1. Set `DATA_SOURCE=prisma`
-2. Update `DATABASE_URL` to a non-production MSSQL connection string
-3. Run `npm run prisma:pull` if you need to introspect an existing schema
-4. Restart `npm run start:dev`
+1. 複製 `.env.example` 成 `.env`
+2. 安裝相依套件：`npm install`
+3. 開發模式先用 `DATA_SOURCE=mock`
+4. 產生 Prisma client：`npm run prisma:generate`
+5. 啟動開發伺服器：`npm run start:dev`
 
-## Notes
+## 切到 MSSQL
 
-- `prisma/schema.prisma` currently contains a minimal placeholder model set for the new backend.
-- Running `npm run prisma:pull` will update that schema to match the target MSSQL database.
-- The current API scaffold is intentionally read-only.
-- `DATA_SOURCE=mock` returns fixed read-only data for `/api/players` and `/api/audit-logs` so development can continue before DB credentials are ready.
-- Non-read HTTP methods are blocked when `DATABASE_ACCESS_MODE=readonly`.
-- Prisma mutating actions (`create`, `update`, `delete`, `upsert`, `executeRaw`) are blocked in readonly mode as a second safety guard.
+1. 將 `DATA_SOURCE` 改成 `prisma`
+2. 把 `DATABASE_URL` 改成可用的 MSSQL 連線字串
+3. 如需比對現有資料表，執行 `npm run prisma:pull`
+4. 重新啟動 `npm run start:dev`
 
-## Stack
+## 安全規則
 
-- NestJS for the backend application structure
-- Prisma for database access
-- SQL Server for a development or staging copy of the existing game data source
+- 不要直接連生產資料庫
+- 先用 staging 或唯讀 replica
+- `readonly` 模式下，寫入 API 會被封鎖
+- Prisma 的寫入操作也有第二層保護
 
-## Available scripts
+## Git / GitHub
 
-- `npm run start:dev` starts the backend in watch mode
-- `npm run build` compiles the NestJS application into `dist`
-- `npm run check` runs TypeScript type checking without emitting files
-- `npm run prisma:generate` generates the Prisma client
-- `npm run prisma:pull` introspects the existing MSSQL schema into Prisma
+- 預設分支：`main`
+- 先在 feature branch 開發，再合併回主線
+- 不要把 `.env`、`node_modules`、`dist` 推上去
+
+## Scripts
+
+- `npm run start:dev` 開發模式
+- `npm run build` 編譯專案
+- `npm run check` TypeScript 檢查
+- `npm run prisma:generate` 產生 Prisma client
+- `npm run prisma:pull` 讀取 MSSQL schema
