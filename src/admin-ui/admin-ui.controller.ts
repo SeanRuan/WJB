@@ -631,6 +631,10 @@ export class AdminUiController {
               <option value="rejected">rejected</option>
             </select>
           </div>
+          <div>
+            <label for="guildReviewNote">審核備註</label>
+            <input id="guildReviewNote" placeholder="核准或駁回時使用" />
+          </div>
         </div>
         <div class="split">
           <div>
@@ -1251,7 +1255,7 @@ export class AdminUiController {
 
     async function reviewGuildRequest(requestId, action) {
       try {
-        const reviewNote = prompt('請輸入審核備註（可留空）') || '';
+        const reviewNote = document.getElementById('guildReviewNote').value.trim();
         await api('/api/guild-approvals/' + requestId + '/' + action, {
           method: 'POST',
           body: JSON.stringify({ reviewNote }),
