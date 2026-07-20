@@ -9,6 +9,7 @@
 2. Run `npm run check`.
 3. Run `npm run build`.
 4. Keep `.env`, secrets, `node_modules`, and `dist` out of Git.
+5. Run `npm run check:secrets` before commit.
 
 ## Important safety rules
 - Do not connect to production directly.
@@ -21,6 +22,10 @@
 - `BRANCHING.md` for branch naming.
 - `RELEASE_CHECKLIST.md` for release steps.
 - `RELEASE_NOTES.md` for version summary.
+
+## Hook setup
+- Recommended once per machine: `git config core.hooksPath .githooks`
+- The tracked pre-commit hook runs the secret scan script.
 
 ## Project structure
 - `src/` main NestJS application code.

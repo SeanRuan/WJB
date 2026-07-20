@@ -10,6 +10,7 @@
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
     "check": "tsc --noEmit",
+    "check:secrets": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check-secrets.ps1",
     "prisma:generate": "prisma generate",
     "prisma:pull": "prisma db pull"
   },

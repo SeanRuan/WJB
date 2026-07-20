@@ -13,11 +13,17 @@
 - Do not commit `.env` or secrets.
 - Do not commit `node_modules`, `dist`, or local build artifacts.
 - Keep database writes behind the existing readonly safeguards.
+- Run `npm run check:secrets` before commit.
+
+## Git hook setup
+- Recommended once per machine: `git config core.hooksPath .githooks`
+- The tracked pre-commit hook runs the secret scan script.
 
 ## Suggested workflow
 1. Create a branch from `main`.
 2. Make the change.
 3. Run `npm run check`.
 4. Run `npm run build`.
-5. Commit and push.
-6. Open a pull request.
+5. Run `npm run check:secrets`.
+6. Commit and push.
+7. Open a pull request.
