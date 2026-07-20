@@ -1,6 +1,8 @@
 node_modules/
 dist/
 .env
+.env.*
+!.env.example
 *.log
 .DS_Store
 Thumbs.db
@@ -9,3 +11,15 @@ coverage/
 prisma/dev.db
 *.tsbuildinfo
 logs/
+secrets/
+secret/
+*.key
+*.pem
+*.p12
+*.pfx
+*.cer
+*.crt
+*.jks
+*.keystore
+*.token
+*.credentials
