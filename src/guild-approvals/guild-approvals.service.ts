@@ -6,6 +6,8 @@ import {
 import { Prisma } from '@prisma/client';
 
 import { AuditService } from '../audit/audit.service';
+import { listMockAdminUsers } from '../auth/mock-admin-users';
+import { findMockPlayerById } from '../players/mock-players';
 import { PrismaService } from '../prisma/prisma.service';
 import { AddGuildMemberDto } from './dto/add-guild-member.dto';
 import { CreateGuildApprovalRequestDto } from './dto/create-guild-approval-request.dto';
@@ -54,6 +56,10 @@ export class GuildApprovalsService {
     const take = clampTake(options.take);
     const status = options.status?.trim();
     const requestType = options.requestType?.trim();
+
+    if (process.env.DATA_SOURCE === 'mock') {
+      return filterMockGuildApprovalRequests({ status, requestType, take });
+    }
 
     return this.prisma.guildApprovalRequest.findMany({
       where: {
@@ -268,6 +274,10 @@ export class GuildApprovalsService {
     const status = options.status?.trim();
     const search = options.search?.trim();
 
+    if (process.env.DATA_SOURCE === 'mock') {
+      return filterMockGuilds({ status, search, take });
+    }
+
     return this.prisma.guild.findMany({
       where: {
         ...(status ? { status } : {}),
@@ -295,6 +305,16 @@ export class GuildApprovalsService {
   }
 
   async getGuild(id: string) {
+    if (process.env.DATA_SOURCE === 'mock') {
+      const guild = findMockGuildById(id);
+
+      if (!guild) {
+        throw new NotFoundException(`Guild ${id} not found`);
+      }
+
+      return guild;
+    }
+
     const guild = await this.prisma.guild.findUnique({
       where: { id },
       select: {
@@ -688,4 +708,238 @@ function toInt(value: unknown, defaultValue: number) {
   }
 
   return value;
+}
+
+type MockGuildMember = {
+  id: string;
+  playerId: string;
+  role: string;
+  status: string;
+  joinedAt: Date;
+};
+
+type MockGuild = {
+  id: string;
+  name: string;
+  status: string;
+  selfTouchReferenceRate: number;
+  selfTouchReferenceVisible: boolean;
+  winReferenceRate: number;
+  winReferenceVisible: boolean;
+  creationMethod: string;
+  createdByAdminId: string;
+  createdAt: Date;
+  updatedAt: Date;
+  members: MockGuildMember[];
+};
+
+type MockGuildApprovalRequest = {
+  id: string;
+  requestType: RequestType;
+  guildId: string | null;
+  payload: string;
+  status: string;
+  requestedByAdminId: string;
+  reviewedByAdminId: string | null;
+  reviewNote: string | null;
+  createdAt: Date;
+  reviewedAt: Date | null;
+};
+
+const MOCK_GUILDS: MockGuild[] = [
+  {
+    id: 'mock_guild_001',
+    name: '青龍會',
+    status: 'active',
+    selfTouchReferenceRate: 2,
+    selfTouchReferenceVisible: true,
+    winReferenceRate: 3,
+    winReferenceVisible: true,
+    creationMethod: 'customer_service',
+    createdByAdminId: 'mock_admin_owner_01',
+    createdAt: new Date('2026-07-10T10:00:00.000Z'),
+    updatedAt: new Date('2026-07-16T08:00:00.000Z'),
+    members: [
+      {
+        id: 'mock_guild_member_001',
+        playerId: 'mock_player_001',
+        role: 'leader',
+        status: 'active',
+        joinedAt: new Date('2026-07-10T10:00:00.000Z'),
+      },
+      {
+        id: 'mock_guild_member_002',
+        playerId: 'mock_player_002',
+        role: 'member',
+        status: 'active',
+        joinedAt: new Date('2026-07-11T09:00:00.000Z'),
+      },
+    ],
+  },
+  {
+    id: 'mock_guild_002',
+    name: '白虎盟',
+    status: 'revoked',
+    selfTouchReferenceRate: 1,
+    selfTouchReferenceVisible: false,
+    winReferenceRate: 2,
+    winReferenceVisible: true,
+    creationMethod: 'customer_service',
+    createdByAdminId: 'mock_admin_manager_01',
+    createdAt: new Date('2026-07-05T12:00:00.000Z'),
+    updatedAt: new Date('2026-07-14T18:30:00.000Z'),
+    members: [
+      {
+        id: 'mock_guild_member_003',
+        playerId: 'mock_player_003',
+        role: 'leader',
+        status: 'removed',
+        joinedAt: new Date('2026-07-05T12:00:00.000Z'),
+      },
+    ],
+  },
+];
+
+const MOCK_GUILD_APPROVAL_REQUESTS: MockGuildApprovalRequest[] = [
+  {
+    id: 'mock_guild_request_001',
+    requestType: 'create_guild',
+    guildId: null,
+    payload: JSON.stringify({
+      name: '玄武堂',
+      selfTouchReferenceRate: 1,
+      selfTouchReferenceVisible: true,
+      winReferenceRate: 2,
+      winReferenceVisible: false,
+    }),
+    status: 'pending',
+    requestedByAdminId: 'mock_admin_support_01',
+    reviewedByAdminId: null,
+    reviewNote: null,
+    createdAt: new Date('2026-07-17T03:00:00.000Z'),
+    reviewedAt: null,
+  },
+  {
+    id: 'mock_guild_request_002',
+    requestType: 'revoke_guild',
+    guildId: 'mock_guild_002',
+    payload: JSON.stringify({}),
+    status: 'approved',
+    requestedByAdminId: 'mock_admin_manager_01',
+    reviewedByAdminId: 'mock_admin_owner_01',
+    reviewNote: '已核准解散',
+    createdAt: new Date('2026-07-14T09:00:00.000Z'),
+    reviewedAt: new Date('2026-07-14T10:30:00.000Z'),
+  },
+];
+
+function filterMockGuildApprovalRequests(options: {
+  status?: string;
+  requestType?: string;
+  take: number;
+}) {
+  const admins = listMockAdminUsers().map((admin) => ({
+    id: admin.id,
+    email: admin.email,
+    displayName: admin.displayName,
+    role: admin.role,
+  }));
+
+  return MOCK_GUILD_APPROVAL_REQUESTS
+    .filter((request) => (options.status ? request.status === options.status : true))
+    .filter((request) => (options.requestType ? request.requestType === options.requestType : true))
+    .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())
+    .slice(0, options.take)
+    .map((request) => ({
+      ...request,
+      requestedByAdmin:
+        admins.find((admin) => admin.id === request.requestedByAdminId) ?? null,
+      reviewedByAdmin:
+        request.reviewedByAdminId
+          ? admins.find((admin) => admin.id === request.reviewedByAdminId) ?? null
+          : null,
+      guild: request.guildId
+        ? (() => {
+            const guild = MOCK_GUILDS.find((entry) => entry.id === request.guildId);
+            return guild
+              ? { id: guild.id, name: guild.name, status: guild.status }
+              : null;
+          })()
+        : null,
+    }));
+}
+
+function filterMockGuilds(options: {
+  status?: string;
+  search?: string;
+  take: number;
+}) {
+  return MOCK_GUILDS
+    .filter((guild) => (options.status ? guild.status === options.status : true))
+    .filter((guild) =>
+      options.search ? guild.name.toLowerCase().includes(options.search.toLowerCase()) : true,
+    )
+    .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())
+    .slice(0, options.take)
+    .map((guild) => ({
+      id: guild.id,
+      name: guild.name,
+      status: guild.status,
+      selfTouchReferenceRate: guild.selfTouchReferenceRate,
+      selfTouchReferenceVisible: guild.selfTouchReferenceVisible,
+      winReferenceRate: guild.winReferenceRate,
+      winReferenceVisible: guild.winReferenceVisible,
+      creationMethod: guild.creationMethod,
+      createdByAdminId: guild.createdByAdminId,
+      createdAt: guild.createdAt,
+      updatedAt: guild.updatedAt,
+      _count: {
+        members: guild.members.filter((member) => member.status === 'active').length,
+      },
+    }));
+}
+
+function findMockGuildById(id: string) {
+  const guild = MOCK_GUILDS.find((entry) => entry.id === id);
+  if (!guild) {
+    return null;
+  }
+
+  return {
+    id: guild.id,
+    name: guild.name,
+    status: guild.status,
+    selfTouchReferenceRate: guild.selfTouchReferenceRate,
+    selfTouchReferenceVisible: guild.selfTouchReferenceVisible,
+    winReferenceRate: guild.winReferenceRate,
+    winReferenceVisible: guild.winReferenceVisible,
+    creationMethod: guild.creationMethod,
+    createdByAdminId: guild.createdByAdminId,
+    createdAt: guild.createdAt,
+    updatedAt: guild.updatedAt,
+    members: guild.members
+      .slice()
+      .sort((left, right) => right.joinedAt.getTime() - left.joinedAt.getTime())
+      .map((member) => ({
+        id: member.id,
+        playerId: member.playerId,
+        role: member.role,
+        status: member.status,
+        joinedAt: member.joinedAt,
+        player: (() => {
+          const player = findMockPlayerById(member.playerId);
+          return player
+            ? {
+                externalId: player.externalId,
+                nickname: player.nickname,
+                status: player.status,
+              }
+            : {
+                externalId: member.playerId,
+                nickname: member.playerId,
+                status: 'unknown',
+              };
+        })(),
+      })),
+  };
 }
