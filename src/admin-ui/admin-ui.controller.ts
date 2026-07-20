@@ -267,6 +267,34 @@ export class AdminUiController {
     }
     .log:last-child { border-bottom: 0; }
     .log small { display: block; color: var(--muted); margin-top: 4px; }
+    .log-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .mini-card {
+      padding: 14px;
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: rgba(2, 6, 23, 0.72);
+    }
+    .mini-card h3 {
+      margin: 0;
+      font-size: 15px;
+    }
+    .mini-card p {
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    .mini-card ul {
+      margin: 10px 0 0;
+      padding-left: 18px;
+      color: var(--muted);
+      line-height: 1.7;
+    }
     .muted { color: var(--muted); }
     .detail-card {
       margin-top: 14px;
@@ -427,7 +455,18 @@ export class AdminUiController {
           <div class="summary-list" id="summaryHighlights"></div>
         </div>
         <div style="height:14px"></div>
-        <div id="auditBox"></div>
+        <div class="split">
+          <div class="mini-card">
+            <h3>最近稽核動作</h3>
+            <p>看最近誰做了什麼，適合先判斷目前工作焦點。</p>
+            <div id="auditBox"></div>
+          </div>
+          <div class="mini-card">
+            <h3>舊後台監測</h3>
+            <p>這裡只看 Legacy 是否有異動風險，以及要不要回頭追查。</p>
+            <div id="legacyBox"></div>
+          </div>
+        </div>
       </div>
 
       <div class="card section" id="playersSection">
@@ -837,6 +876,7 @@ export class AdminUiController {
     const summaryHighlights = document.getElementById('summaryHighlights');
     const adminUserDetail = document.getElementById('adminUserDetail');
     const auditBox = document.getElementById('auditBox');
+    const legacyBox = document.getElementById('legacyBox');
     const rechargeOrdersBody = document.getElementById('rechargeOrdersBody');
     const rechargeOrderDetail = document.getElementById('rechargeOrderDetail');
     const roomCardBalancesBody = document.getElementById('roomCardBalancesBody');
@@ -937,12 +977,59 @@ export class AdminUiController {
     }
 
     function renderAuditLogs(logs) {
+      const actionLabels = {
+        LIST_AUDIT: '查看稽核紀錄',
+        VIEW_PLAYER: '查看玩家',
+        UPDATE_PLAYER_STATUS: '變更玩家狀態',
+        SUBMIT_RECHARGE_ORDER: '送出核帳申請',
+        CONFIRM_RECHARGE_ORDER: '核准核帳',
+        REJECT_RECHARGE_ORDER: '駁回核帳',
+        SUBMIT_GUILD_APPROVAL_REQUEST: '送出公會申請',
+        APPROVE_GUILD_APPROVAL_REQUEST: '核准公會申請',
+        REJECT_GUILD_APPROVAL_REQUEST: '駁回公會申請',
+      };
+
       auditBox.innerHTML = logs.map((log) => {
+        const title = actionLabels[log.action] || log.action;
         return '<div class="log">' +
-          '<strong>' + log.action + '</strong> · ' + log.entityName +
-          '<small>' + log.summary + ' · ' + new Date(log.createdAt).toLocaleString('zh-TW') + '</small>' +
+          '<div class="log-title"><strong>' + title + '</strong><span class="pill">' + log.entityName + '</span></div>' +
+          '<small>' + log.summary + '</small>' +
+          '<small>時間：' + new Date(log.createdAt).toLocaleString('zh-TW') + '；操作管理員：' + (log.adminUserId || '-') + '</small>' +
           '</div>';
       }).join('') || '<div class="muted">沒有稽核紀錄</div>';
+    }
+
+    function renderLegacyMonitor(legacyChange) {
+      const hasChanges = legacyChange?.hasChanges ?? false;
+      const changedTables = legacyChange?.changedTables || [];
+      const capturedAt = legacyChange?.capturedAt
+        ? new Date(legacyChange.capturedAt).toLocaleString('zh-TW')
+        : '尚無快照';
+
+      const nextSteps = hasChanges
+        ? [
+            '先回頭看稽核紀錄，確認最近是否剛做過資料調整。',
+            '如果變更不在預期內，再去查 legacy tables 的實際差異。',
+          ]
+        : [
+            '目前沒有明顯異動風險。',
+            '若要展示，只要說目前 legacy 監測正常即可。',
+          ];
+
+      legacyBox.innerHTML =
+        '<div class="summary-item">' +
+        '<strong>監測狀態</strong>' +
+        '<span>' + (hasChanges ? '有異動，需要留意' : '目前穩定，無明顯異動') + '</span>' +
+        '</div>' +
+        '<div class="summary-item">' +
+        '<strong>最近快照</strong>' +
+        '<span>' + capturedAt + '</span>' +
+        '</div>' +
+        '<div class="summary-item">' +
+        '<strong>異動表</strong>' +
+        '<span>' + (changedTables.length ? changedTables.join('、') : '無') + '</span>' +
+        '</div>' +
+        '<ul>' + nextSteps.map((step) => '<li>' + step + '</li>').join('') + '</ul>';
     }
 
     function renderPlayers(players) {
@@ -1259,6 +1346,7 @@ export class AdminUiController {
       const summary = await api('/api/dashboard');
       renderMetrics(summary);
       renderAuditLogs(summary.recentAuditLogs || []);
+      renderLegacyMonitor(summary.legacyChange || null);
       modeText.textContent = '已登入後台';
     }
 
