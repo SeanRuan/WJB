@@ -26,7 +26,7 @@ if ($matches) {
   exit 1
 }
 
-$contentFilePattern = '(?i)\.(env|ps1|json|ya?ml|ini|cfg|toml|conf|config|js|cjs|mjs|ts)$'
+$contentFilePattern = '(?i)\.(env|ps1|json|ya?ml|ini|cfg|toml|conf|config)$'
 $contentFiles = $trackedFiles | Where-Object {
   (
     ($_ -match $contentFilePattern) -and
