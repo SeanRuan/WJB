@@ -45,6 +45,13 @@
 - 先在 feature branch 開發，再合併回主線
 - 不要把 `.env`、`node_modules`、`dist` 推上去
 
+## 分享給朋友
+
+- 如果只是要看程式碼，直接分享 GitHub repo 連結即可：`https://github.com/SeanRuan/WJB`
+- 如果 repo 是私人倉庫，先到 GitHub 的 Settings > Collaborators 邀請朋友
+- 如果朋友要本機執行，請他先 `git clone`，再依照這份 README 的快速啟動步驟設定 `.env`
+- 如果你只想分享最新版本，先確認 `main` 已經 `git push` 到 GitHub
+
 ## 交接文件
 
 - [HANDOFF.md](HANDOFF.md)
