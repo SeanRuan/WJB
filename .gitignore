@@ -10,6 +10,7 @@ Thumbs.db
 coverage/
 prisma/dev.db
 *.tsbuildinfo
+.cache/
 logs/
 secrets/
 secret/

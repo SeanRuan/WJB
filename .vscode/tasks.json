@@ -11,7 +11,14 @@
     {
       "label": "npm: start:dev",
       "type": "shell",
-      "command": "npm run start:dev",
+      "command": "pwsh",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "scripts/start-dev.ps1"
+      ],
       "isBackground": true,
       "problemMatcher": ["$tsc-watch"]
     },
