@@ -1,17 +1,21 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import * as path from 'node:path';
 
 import { AuditService } from '../audit/audit.service';
-import { listMockPlayers } from '../players/mock-players';
+import { listMockPlayers, updateMockPlayerRoomCardBalance } from '../players/mock-players';
 import { PrismaService } from '../prisma/prisma.service';
 import { AdjustRoomCardBalanceDto } from './dto/adjust-room-card-balance.dto';
 
 type ListRoomCardBalancesOptions = {
   search?: string;
+  playerId?: string;
   take?: number;
 };
 
 type ListRoomCardLogsOptions = {
   search?: string;
+  playerId?: string;
   sourceType?: string;
   take?: number;
 };
@@ -49,23 +53,27 @@ export class RoomCardsService {
   async listBalances(options: ListRoomCardBalancesOptions) {
     const take = clampTake(options.take);
     const search = options.search?.trim();
+    const playerId = options.playerId?.trim();
 
     if (process.env.DATA_SOURCE === 'mock') {
-      return filterMockBalances({ search, take });
+      return filterMockBalances({ search, playerId, take });
     }
 
     try {
       return await this.prisma.roomCardBalance.findMany({
-        where: search
-          ? {
-              player: {
-                OR: [
-                  { externalId: { contains: search } },
-                  { nickname: { contains: search } },
-                ],
-              },
-            }
-          : undefined,
+        where: {
+          ...(playerId ? { playerId } : {}),
+          ...(search
+            ? {
+                player: {
+                  OR: [
+                    { externalId: { contains: search } },
+                    { nickname: { contains: search } },
+                  ],
+                },
+              }
+            : {}),
+        },
         orderBy: { updatedAt: 'desc' },
         take,
         include: {
@@ -84,6 +92,10 @@ export class RoomCardsService {
           [Create_Date]
         FROM [T_Member_Account]
         WHERE (
+          ${playerId || ''} = '' OR
+          [User_GUID] = ${playerId || ''}
+        )
+        AND (
           ${search || ''} = '' OR
           [User_GUID] LIKE '%' + ${search || ''} + '%' OR
           [EMail] LIKE '%' + ${search || ''} + '%' OR
@@ -107,15 +119,17 @@ export class RoomCardsService {
   async listLogs(options: ListRoomCardLogsOptions) {
     const take = clampTake(options.take);
     const search = options.search?.trim();
+    const playerId = options.playerId?.trim();
     const sourceType = options.sourceType?.trim();
 
     if (process.env.DATA_SOURCE === 'mock') {
-      return filterMockLogs({ search, sourceType, take });
+      return filterMockLogs({ search, playerId, sourceType, take });
     }
 
     try {
       return await this.prisma.roomCardLog.findMany({
         where: {
+          ...(playerId ? { playerId } : {}),
           ...(search
             ? {
                 player: {
@@ -150,6 +164,10 @@ export class RoomCardsService {
         LEFT JOIN [T_Member_Account] m
           ON m.[User_GUID] = l.[User_GUID]
         WHERE (
+          ${playerId || ''} = '' OR
+          l.[User_GUID] = ${playerId || ''}
+        )
+        AND (
           ${search || ''} = '' OR
           l.[User_GUID] LIKE '%' + ${search || ''} + '%' OR
           m.[EMail] LIKE '%' + ${search || ''} + '%' OR
@@ -167,22 +185,40 @@ export class RoomCardsService {
 
   // 手動調整：異動一律留下 RoomCardLog（sourceType = admin_adjust），不可讓餘額變負數。
   async adjustBalance(dto: AdjustRoomCardBalanceDto, adminId: string) {
+    const note = String(dto.note || '').trim();
+    if (!note) {
+      throw new BadRequestException('調整房卡需填寫原因');
+    }
+
+    const normalizedDto: AdjustRoomCardBalanceDto = {
+      ...dto,
+      note,
+    };
+
     if (process.env.DATA_SOURCE === 'mock') {
-      const updatedBalance = adjustMockBalance(dto, adminId);
+      const beforeBalance =
+        MOCK_ROOM_CARD_BALANCES.find((item) => item.playerId === normalizedDto.playerId)?.balance ?? 0;
+      const updatedBalance = adjustMockBalance(normalizedDto, adminId);
 
       await this.auditService.recordAuditLog({
         action: 'ADJUST_ROOM_CARD_BALANCE',
         entityName: 'RoomCardBalance',
-        entityId: dto.playerId,
+        entityId: normalizedDto.playerId,
         summary: '主管手動調整房卡餘額',
         metadata: {
-          playerId: dto.playerId,
-          changeAmount: dto.changeAmount,
-          note: dto.note,
-          balanceAfter: updatedBalance.balance,
+          before: {
+            playerId: normalizedDto.playerId,
+            balance: beforeBalance,
+          },
+          after: {
+            playerId: normalizedDto.playerId,
+            balance: updatedBalance.balance,
+            changeAmount: normalizedDto.changeAmount,
+            note,
+          },
         },
         adminUserId: adminId,
-        playerId: dto.playerId,
+        playerId: normalizedDto.playerId,
       });
 
       return updatedBalance;
@@ -190,11 +226,11 @@ export class RoomCardsService {
 
     return this.prisma.$transaction(async (tx) => {
       const existing = await tx.roomCardBalance.findUnique({
-        where: { playerId: dto.playerId },
+        where: { playerId: normalizedDto.playerId },
       });
 
       const currentBalance = existing?.balance ?? 0;
-      const nextBalance = currentBalance + dto.changeAmount;
+      const nextBalance = currentBalance + normalizedDto.changeAmount;
 
       if (nextBalance < 0) {
         throw new BadRequestException(
@@ -203,19 +239,19 @@ export class RoomCardsService {
       }
 
       const updatedBalance = await tx.roomCardBalance.upsert({
-        where: { playerId: dto.playerId },
-        create: { playerId: dto.playerId, balance: nextBalance },
+        where: { playerId: normalizedDto.playerId },
+        create: { playerId: normalizedDto.playerId, balance: nextBalance },
         update: { balance: nextBalance },
       });
 
       await tx.roomCardLog.create({
         data: {
-          playerId: dto.playerId,
-          changeAmount: dto.changeAmount,
+          playerId: normalizedDto.playerId,
+          changeAmount: normalizedDto.changeAmount,
           balanceAfter: updatedBalance.balance,
           sourceType: 'admin_adjust',
           adminUserId: adminId,
-          note: dto.note,
+          note,
         },
       });
 
@@ -223,16 +259,22 @@ export class RoomCardsService {
         {
           action: 'ADJUST_ROOM_CARD_BALANCE',
           entityName: 'RoomCardBalance',
-          entityId: dto.playerId,
+          entityId: normalizedDto.playerId,
           summary: '主管手動調整房卡餘額',
           metadata: {
-            playerId: dto.playerId,
-            changeAmount: dto.changeAmount,
-            note: dto.note,
-            balanceAfter: updatedBalance.balance,
+            before: {
+              playerId: normalizedDto.playerId,
+              balance: currentBalance,
+            },
+            after: {
+              playerId: normalizedDto.playerId,
+              balance: updatedBalance.balance,
+              changeAmount: normalizedDto.changeAmount,
+              note,
+            },
           },
           adminUserId: adminId,
-          playerId: dto.playerId,
+          playerId: normalizedDto.playerId,
         },
         tx,
       );
@@ -287,7 +329,39 @@ type MockRoomCardBalance = {
   player: { externalId: string; nickname: string };
 };
 
-const MOCK_ROOM_CARD_BALANCES: MockRoomCardBalance[] = [
+type PersistedMockRoomCardBalance = {
+  playerId: string;
+  balance: number;
+  updatedAt: string;
+  player: { externalId: string; nickname: string };
+};
+
+type PersistedMockRoomCardLog = {
+  id: string;
+  playerId: string;
+  changeAmount: number;
+  balanceAfter: number;
+  sourceType: string;
+  relatedTableId: string | null;
+  relatedRechargeOrderId: string | null;
+  adminUserId: string | null;
+  note: string | null;
+  createdAt: string;
+};
+
+type PersistedMockRoomCardState = {
+  balances: PersistedMockRoomCardBalance[];
+  logs: PersistedMockRoomCardLog[];
+};
+
+const MOCK_ROOM_CARD_STATE_PATH = path.join(
+  process.cwd(),
+  '.cache',
+  'mock-state',
+  'room-cards.json',
+);
+
+const SEEDED_MOCK_ROOM_CARD_BALANCES: MockRoomCardBalance[] = [
   {
     playerId: 'mock_player_001',
     balance: 220,
@@ -321,7 +395,7 @@ type MockRoomCardLog = {
   createdAt: Date;
 };
 
-const MOCK_ROOM_CARD_LOGS: MockRoomCardLog[] = [
+const SEEDED_MOCK_ROOM_CARD_LOGS: MockRoomCardLog[] = [
   {
     id: 'mock_room_card_log_001',
     playerId: 'mock_player_002',
@@ -348,18 +422,27 @@ const MOCK_ROOM_CARD_LOGS: MockRoomCardLog[] = [
   },
 ];
 
+const MOCK_ROOM_CARD_STATE = loadMockRoomCardState();
+const MOCK_ROOM_CARD_BALANCES: MockRoomCardBalance[] = MOCK_ROOM_CARD_STATE.balances;
+const MOCK_ROOM_CARD_LOGS: MockRoomCardLog[] = MOCK_ROOM_CARD_STATE.logs;
 let mockRoomCardLogSequence = MOCK_ROOM_CARD_LOGS.length;
 
-function filterMockBalances(options: { search?: string; take: number }) {
+function filterMockBalances(options: { search?: string; playerId?: string; take: number }) {
   const normalizedSearch = options.search?.toLowerCase();
+  const normalizedPlayerId = options.playerId?.trim();
+  const balances = getMockBalances();
 
-  const result = normalizedSearch
-    ? MOCK_ROOM_CARD_BALANCES.filter(
-        (balance) =>
-          balance.player.externalId.toLowerCase().includes(normalizedSearch) ||
-          balance.player.nickname.toLowerCase().includes(normalizedSearch),
-      )
-    : MOCK_ROOM_CARD_BALANCES;
+  const result = balances.filter((balance) => {
+    const matchesSearch = normalizedSearch
+      ? balance.player.externalId.toLowerCase().includes(normalizedSearch) ||
+        balance.player.nickname.toLowerCase().includes(normalizedSearch)
+      : true;
+    const matchesPlayerId = normalizedPlayerId
+      ? balance.playerId === normalizedPlayerId
+      : true;
+
+    return matchesSearch && matchesPlayerId;
+  });
 
   return result
     .slice()
@@ -367,12 +450,36 @@ function filterMockBalances(options: { search?: string; take: number }) {
     .slice(0, options.take);
 }
 
+function getMockBalances() {
+  const balancesByPlayerId = new Map(
+    MOCK_ROOM_CARD_BALANCES.map((balance) => [balance.playerId, balance]),
+  );
+
+  listMockPlayers().forEach((player) => {
+    if (!balancesByPlayerId.has(player.id)) {
+      balancesByPlayerId.set(player.id, {
+        playerId: player.id,
+        balance: player.roomCardBalance?.balance ?? 0,
+        updatedAt: player.updatedAt,
+        player: {
+          externalId: player.externalId,
+          nickname: player.nickname,
+        },
+      });
+    }
+  });
+
+  return [...balancesByPlayerId.values()];
+}
+
 function filterMockLogs(options: {
   search?: string;
+  playerId?: string;
   sourceType?: string;
   take: number;
 }) {
   const normalizedSearch = options.search?.toLowerCase();
+  const normalizedPlayerId = options.playerId?.trim();
   const normalizedSourceType = options.sourceType?.toLowerCase();
 
   const matchingPlayerIds = normalizedSearch
@@ -389,11 +496,14 @@ function filterMockLogs(options: {
     const matchesPlayer = matchingPlayerIds
       ? matchingPlayerIds.includes(log.playerId)
       : true;
+    const matchesPlayerId = normalizedPlayerId
+      ? log.playerId === normalizedPlayerId
+      : true;
     const matchesSourceType = normalizedSourceType
       ? log.sourceType.toLowerCase() === normalizedSourceType
       : true;
 
-    return matchesPlayer && matchesSourceType;
+    return matchesPlayer && matchesPlayerId && matchesSourceType;
   });
 
   return result
@@ -429,6 +539,8 @@ function adjustMockBalance(dto: AdjustRoomCardBalanceDto, adminId: string) {
     balanceEntry.updatedAt = new Date();
   }
 
+  updateMockPlayerRoomCardBalance(dto.playerId, nextBalance);
+
   mockRoomCardLogSequence += 1;
 
   MOCK_ROOM_CARD_LOGS.unshift({
@@ -444,7 +556,73 @@ function adjustMockBalance(dto: AdjustRoomCardBalanceDto, adminId: string) {
     createdAt: new Date(),
   });
 
+  saveMockRoomCardState(MOCK_ROOM_CARD_BALANCES, MOCK_ROOM_CARD_LOGS);
+
   return balanceEntry;
+}
+
+function loadMockRoomCardState(): { balances: MockRoomCardBalance[]; logs: MockRoomCardLog[] } {
+  if (!existsSync(MOCK_ROOM_CARD_STATE_PATH)) {
+    const seededState = {
+      balances: SEEDED_MOCK_ROOM_CARD_BALANCES,
+      logs: SEEDED_MOCK_ROOM_CARD_LOGS,
+    };
+    saveMockRoomCardState(seededState.balances, seededState.logs);
+    return seededState;
+  }
+
+  try {
+    const content = readFileSync(MOCK_ROOM_CARD_STATE_PATH, 'utf8');
+    const parsed = JSON.parse(content) as PersistedMockRoomCardState;
+    const balances = Array.isArray(parsed?.balances) ? parsed.balances.map(deserializeMockRoomCardBalance) : SEEDED_MOCK_ROOM_CARD_BALANCES;
+    const logs = Array.isArray(parsed?.logs) ? parsed.logs.map(deserializeMockRoomCardLog) : SEEDED_MOCK_ROOM_CARD_LOGS;
+    return { balances, logs };
+  } catch {
+    const seededState = {
+      balances: SEEDED_MOCK_ROOM_CARD_BALANCES,
+      logs: SEEDED_MOCK_ROOM_CARD_LOGS,
+    };
+    saveMockRoomCardState(seededState.balances, seededState.logs);
+    return seededState;
+  }
+}
+
+function saveMockRoomCardState(balances: MockRoomCardBalance[], logs: MockRoomCardLog[]) {
+  const payload: PersistedMockRoomCardState = {
+    balances: balances.map(serializeMockRoomCardBalance),
+    logs: logs.map(serializeMockRoomCardLog),
+  };
+
+  mkdirSync(path.dirname(MOCK_ROOM_CARD_STATE_PATH), { recursive: true });
+  writeFileSync(MOCK_ROOM_CARD_STATE_PATH, JSON.stringify(payload, null, 2), 'utf8');
+}
+
+function serializeMockRoomCardBalance(balance: MockRoomCardBalance): PersistedMockRoomCardBalance {
+  return {
+    ...balance,
+    updatedAt: balance.updatedAt.toISOString(),
+  };
+}
+
+function deserializeMockRoomCardBalance(balance: PersistedMockRoomCardBalance): MockRoomCardBalance {
+  return {
+    ...balance,
+    updatedAt: new Date(balance.updatedAt),
+  };
+}
+
+function serializeMockRoomCardLog(log: MockRoomCardLog): PersistedMockRoomCardLog {
+  return {
+    ...log,
+    createdAt: log.createdAt.toISOString(),
+  };
+}
+
+function deserializeMockRoomCardLog(log: PersistedMockRoomCardLog): MockRoomCardLog {
+  return {
+    ...log,
+    createdAt: new Date(log.createdAt),
+  };
 }
 
 function clampTake(take?: number) {

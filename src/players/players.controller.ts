@@ -4,6 +4,7 @@ import {
     Get,
     Param,
     Patch,
+    Post,
     Query,
     UseGuards,
 } from '@nestjs/common';
@@ -13,7 +14,9 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { AuthenticatedAdmin } from '../auth/types';
+import { CreatePlayerDto } from './dto/create-player.dto';
 import { UpdatePlayerStatusDto } from './dto/update-player-status.dto';
+import { UpdatePlayerDto } from './dto/update-player.dto';
 import { PlayersService } from './players.service';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -29,6 +32,7 @@ export class PlayersController {
     @Query('joined') joined?: string,
     @Query('createdFrom') createdFrom?: string,
     @Query('createdTo') createdTo?: string,
+    @Query('offset') offset?: string,
     @Query('take') take?: string,
   ) {
     return this.playersService.listPlayers({
@@ -37,6 +41,7 @@ export class PlayersController {
       joined,
       createdFrom,
       createdTo,
+      offset: offset ? Number(offset) : undefined,
       take: take ? Number(take) : undefined,
     });
   }
@@ -45,6 +50,25 @@ export class PlayersController {
   @Get(':id')
   getPlayer(@Param('id') id: string) {
     return this.playersService.getPlayer(id);
+  }
+
+  @Roles('manager', 'owner')
+  @Post()
+  createPlayer(
+    @Body() dto: CreatePlayerDto,
+    @CurrentAdmin() admin: AuthenticatedAdmin,
+  ) {
+    return this.playersService.createPlayer(dto, admin.id);
+  }
+
+  @Roles('manager', 'owner')
+  @Patch(':id')
+  updatePlayer(
+    @Param('id') id: string,
+    @Body() dto: UpdatePlayerDto,
+    @CurrentAdmin() admin: AuthenticatedAdmin,
+  ) {
+    return this.playersService.updatePlayer(id, dto, admin.id);
   }
 
   @Roles('manager', 'owner')

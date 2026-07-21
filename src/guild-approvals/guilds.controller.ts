@@ -29,11 +29,13 @@ export class GuildsController {
   getGuilds(
     @Query('status') status?: string,
     @Query('search') search?: string,
+    @Query('playerId') playerId?: string,
     @Query('take') take?: string,
   ) {
     return this.guildApprovalsService.listGuilds({
       status,
       search,
+      playerId,
       take: take ? Number(take) : undefined,
     });
   }

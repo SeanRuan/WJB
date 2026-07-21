@@ -23,8 +23,8 @@ export function validateEnv(config: EnvMap): EnvMap {
     throw new Error('APP_MODE must be safe-dev for this scaffold');
   }
 
-  if (config.DATABASE_ACCESS_MODE !== 'readonly') {
-    throw new Error('DATABASE_ACCESS_MODE must be readonly for this scaffold');
+  if (!['readonly', 'write'].includes(config.DATABASE_ACCESS_MODE ?? '')) {
+    throw new Error('DATABASE_ACCESS_MODE must be readonly or write for this scaffold');
   }
 
   if (!['mock', 'prisma'].includes(config.DATA_SOURCE ?? '')) {

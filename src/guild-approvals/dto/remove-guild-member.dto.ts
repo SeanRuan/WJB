@@ -1,8 +1,9 @@
-import { IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsString, Matches, MaxLength, MinLength } from 'class-validator';
 
 export class RemoveGuildMemberDto {
-  @IsOptional()
   @IsString()
+  @MinLength(2)
   @MaxLength(500)
-  note?: string;
+  @Matches(/\S/, { message: 'note 不可為空白' })
+  note!: string;
 }
