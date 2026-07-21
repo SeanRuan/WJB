@@ -7,10 +7,19 @@
   "scripts": {
     "build": "nest build",
     "start": "node dist/main.js",
-    "start:dev": "nest start --watch",
+    "dev:watch:build": "tsc -p tsconfig.build.json --watch --preserveWatchOutput",
+    "dev:watch:serve": "nodemon --watch dist --ext js,json --delay 250ms --exec \"node dist/main.js\"",
+    "start:dev:raw": "concurrently --restart-tries 999 --restart-after 1200 -n BUILD,APP -c cyan,green \"npm:dev:watch:build\" \"npm:dev:watch:serve\"",
+    "start:dev": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/start-dev.ps1",
     "start:debug": "nest start --debug --watch",
     "check": "tsc --noEmit",
     "check:secrets": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check-secrets.ps1",
+    "smoke:reset-mock-state": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/reset-mock-state.ps1",
+    "smoke:admin-disable": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/admin-disable-smoke.ps1",
+    "smoke:core-cs": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/smoke-core-cs.ps1",
+    "smoke:guild-approval-review": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/guild-approval-review-smoke.ps1",
+    "smoke:guild-member": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/guild-member-smoke.ps1",
+    "smoke:recharge-review": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/recharge-review-smoke.ps1",
     "prisma:generate": "prisma generate",
     "prisma:pull": "prisma db pull"
   },
@@ -38,6 +47,8 @@
     "@types/bcrypt": "^6.0.0",
     "@types/node": "^24.0.15",
     "@types/passport-jwt": "^4.0.1",
+    "concurrently": "^9.2.4",
+    "nodemon": "^3.1.14",
     "prisma": "^6.12.0",
     "typescript": "^5.8.3"
   }

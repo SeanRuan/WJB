@@ -14,22 +14,54 @@ function Get-ListenerPids {
     Select-Object -ExpandProperty OwningProcess -Unique
 }
 
+function Get-ChildProcessIds {
+  param([int]$ParentProcessId)
+
+  Get-CimInstance Win32_Process -Filter "ParentProcessId = $ParentProcessId" -ErrorAction SilentlyContinue |
+    Select-Object -ExpandProperty ProcessId
+}
+
+function Stop-ProcessTree {
+  param([int]$ProcessId)
+
+  & taskkill.exe /PID $ProcessId /T /F | Out-Null
+
+  if ($LASTEXITCODE -ne 0) {
+    $childProcessIds = @(Get-ChildProcessIds -ParentProcessId $ProcessId)
+    foreach ($childProcessId in $childProcessIds) {
+      Stop-ProcessTree -ProcessId $childProcessId
+    }
+
+    Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
+  }
+}
+
+function Wait-ForFreePort {
+  for ($i = 0; $i -lt 30; $i++) {
+    if (-not (Get-ListenerPids)) {
+      return
+    }
+
+    Start-Sleep -Milliseconds 100
+  }
+
+  throw "Port $Port is still in use."
+}
+
 function Stop-Backend {
   $procIds = Get-ListenerPids
   foreach ($procId in $procIds) {
-    Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
+    Stop-ProcessTree -ProcessId $procId
   }
-  Start-Sleep -Milliseconds 200
-  if (Get-ListenerPids) {
-    throw "Port $Port is still in use."
-  }
+
+  Wait-ForFreePort
   Write-Output "Stopped. Port $Port is free."
 }
 
 function Start-Backend {
   if (Get-ListenerPids) {
-    Write-Output "Port $Port already has a listener."
-    return
+    Write-Output "Port $Port already has a listener. Stopping it first..."
+    Stop-Backend
   }
 
   if (-not (Test-Path (Join-Path $PSScriptRoot '..\\dist\\main.js'))) {
@@ -46,16 +78,16 @@ function Start-Backend {
   $nodeArgs = 'dist/main.js'
   Start-Process -FilePath 'node' -ArgumentList $nodeArgs -WorkingDirectory $workDir -WindowStyle Hidden | Out-Null
 
-  $ready = $false
   for ($i = 0; $i -lt 25; $i++) {
     Start-Sleep -Milliseconds 200
     if (Get-ListenerPids) {
-      $ready = $true
-      break
+      $pids = Get-ListenerPids
+      Write-Output ("Started. Port {0} PID(s): {1}" -f $Port, ($pids -join ','))
+      return
     }
   }
 
-  if (-not $ready) {
+  if (-not (Get-ListenerPids)) {
     throw "Backend did not start on port $Port."
   }
 
