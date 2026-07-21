@@ -7,6 +7,7 @@ import { RolesGuard } from '../auth/roles.guard';
 import { AuthenticatedAdmin } from '../auth/types';
 import { AdminUsersService } from './admin-users.service';
 import { CreateAdminUserDto } from './dto/create-admin-user.dto';
+import { DisableAdminUserDto } from './dto/disable-admin-user.dto';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('admin-users')
@@ -37,8 +38,9 @@ export class AdminUsersController {
   @Patch(':id/disable')
   disableAdminUser(
     @Param('id') id: string,
+    @Body() dto: DisableAdminUserDto,
     @CurrentAdmin() admin: AuthenticatedAdmin,
   ) {
-    return this.adminUsersService.disableAdminUser(id, admin.id);
+    return this.adminUsersService.disableAdminUser(id, admin.id, dto.reason);
   }
 }

@@ -11,6 +11,7 @@ import { SubmitRechargeOrderDto } from './dto/submit-recharge-order.dto';
 
 type ListRechargeOrdersOptions = {
   status?: string;
+  playerId?: string;
   take?: number;
 };
 
@@ -33,14 +34,18 @@ export class RechargeOrdersService {
   async listRechargeOrders(options: ListRechargeOrdersOptions) {
     const take = clampTake(options.take);
     const status = options.status?.trim();
+    const playerId = options.playerId?.trim();
 
     if (process.env.DATA_SOURCE === 'mock') {
-      return filterMockRechargeOrders({ status, take });
+      return filterMockRechargeOrders({ status, playerId, take });
     }
 
     try {
       return await this.prisma.rechargeOrder.findMany({
-        where: status ? { status } : undefined,
+        where: {
+          ...(status ? { status } : {}),
+          ...(playerId ? { playerId } : {}),
+        },
         orderBy: { createdAt: 'desc' },
         take,
       });
@@ -87,7 +92,7 @@ export class RechargeOrdersService {
         reviewNote: 'Legacy recharge log (read-only projection)',
         createdAt: row.Create_Date || new Date(),
         reviewedAt: row.Create_Date || new Date(),
-      }));
+      })).filter((row) => (playerId ? row.playerId === playerId : true));
     }
   }
 
@@ -101,10 +106,12 @@ export class RechargeOrdersService {
         entityId: createdOrder.id,
         summary: '客服登記房卡購買核帳，等待主管核准',
         metadata: {
-          playerId: createdOrder.playerId,
-          amount: createdOrder.amount,
-          roomCardAmount: createdOrder.roomCardAmount,
-          status: createdOrder.status,
+          after: {
+            playerId: createdOrder.playerId,
+            amount: createdOrder.amount,
+            roomCardAmount: createdOrder.roomCardAmount,
+            status: createdOrder.status,
+          },
         },
         adminUserId: adminId,
         playerId: createdOrder.playerId,
@@ -133,10 +140,12 @@ export class RechargeOrdersService {
           entityId: createdOrder.id,
           summary: '客服登記房卡購買核帳，等待主管核准',
           metadata: {
-            playerId: createdOrder.playerId,
-            amount: createdOrder.amount,
-            roomCardAmount: createdOrder.roomCardAmount,
-            status: createdOrder.status,
+            after: {
+              playerId: createdOrder.playerId,
+              amount: createdOrder.amount,
+              roomCardAmount: createdOrder.roomCardAmount,
+              status: createdOrder.status,
+            },
           },
           adminUserId: adminId,
           playerId: createdOrder.playerId,
@@ -155,8 +164,18 @@ export class RechargeOrdersService {
     dto: ReviewRechargeOrderDto,
     adminId: string,
   ) {
+    const reviewNote = String(dto.reviewNote || '').trim();
+    if (!reviewNote) {
+      throw new BadRequestException('核帳審核需填寫原因');
+    }
+
+    const normalizedDto: ReviewRechargeOrderDto = { reviewNote };
+
     if (process.env.DATA_SOURCE === 'mock') {
-      const confirmedOrder = confirmMockRechargeOrder(id, dto, adminId);
+      const before = {
+        status: findMockRechargeOrderOrThrow(id).status,
+      };
+      const confirmedOrder = confirmMockRechargeOrder(id, normalizedDto, adminId);
 
       await this.auditService.recordAuditLog({
         action: 'CONFIRM_RECHARGE_ORDER',
@@ -164,10 +183,14 @@ export class RechargeOrdersService {
         entityId: confirmedOrder.id,
         summary: '主管核准房卡購買並完成加房卡',
         metadata: {
-          playerId: confirmedOrder.playerId,
-          amount: confirmedOrder.amount,
-          roomCardAmount: confirmedOrder.roomCardAmount,
-          status: confirmedOrder.status,
+          before,
+          after: {
+            playerId: confirmedOrder.playerId,
+            amount: confirmedOrder.amount,
+            roomCardAmount: confirmedOrder.roomCardAmount,
+            status: confirmedOrder.status,
+            reviewNote: confirmedOrder.reviewNote,
+          },
         },
         adminUserId: adminId,
         playerId: confirmedOrder.playerId,
@@ -194,7 +217,7 @@ export class RechargeOrdersService {
         data: {
           status: 'confirmed',
           reviewedByAdminId: adminId,
-          reviewNote: dto.reviewNote,
+          reviewNote,
           reviewedAt: new Date(),
         },
       });
@@ -224,10 +247,19 @@ export class RechargeOrdersService {
           entityId: order.id,
           summary: '主管核准房卡購買並完成加房卡',
           metadata: {
-            playerId: order.playerId,
-            amount: order.amount,
-            roomCardAmount: order.roomCardAmount,
-            status: 'confirmed',
+            before: {
+              playerId: order.playerId,
+              amount: order.amount,
+              roomCardAmount: order.roomCardAmount,
+              status: order.status,
+            },
+            after: {
+              playerId: order.playerId,
+              amount: order.amount,
+              roomCardAmount: order.roomCardAmount,
+              status: 'confirmed',
+              reviewNote,
+            },
           },
           adminUserId: adminId,
           playerId: order.playerId,
@@ -245,8 +277,18 @@ export class RechargeOrdersService {
     dto: ReviewRechargeOrderDto,
     adminId: string,
   ) {
+    const reviewNote = String(dto.reviewNote || '').trim();
+    if (!reviewNote) {
+      throw new BadRequestException('核帳審核需填寫原因');
+    }
+
+    const normalizedDto: ReviewRechargeOrderDto = { reviewNote };
+
     if (process.env.DATA_SOURCE === 'mock') {
-      const rejectedOrder = rejectMockRechargeOrder(id, dto, adminId);
+      const before = {
+        status: findMockRechargeOrderOrThrow(id).status,
+      };
+      const rejectedOrder = rejectMockRechargeOrder(id, normalizedDto, adminId);
 
       await this.auditService.recordAuditLog({
         action: 'REJECT_RECHARGE_ORDER',
@@ -254,11 +296,14 @@ export class RechargeOrdersService {
         entityId: rejectedOrder.id,
         summary: '主管駁回房卡購買核帳',
         metadata: {
-          playerId: rejectedOrder.playerId,
-          amount: rejectedOrder.amount,
-          roomCardAmount: rejectedOrder.roomCardAmount,
-          status: rejectedOrder.status,
-          reviewNote: rejectedOrder.reviewNote,
+          before,
+          after: {
+            playerId: rejectedOrder.playerId,
+            amount: rejectedOrder.amount,
+            roomCardAmount: rejectedOrder.roomCardAmount,
+            status: rejectedOrder.status,
+            reviewNote: rejectedOrder.reviewNote,
+          },
         },
         adminUserId: adminId,
         playerId: rejectedOrder.playerId,
@@ -287,7 +332,7 @@ export class RechargeOrdersService {
         data: {
           status: 'rejected',
           reviewedByAdminId: adminId,
-          reviewNote: dto.reviewNote,
+          reviewNote,
           reviewedAt: new Date(),
         },
       });
@@ -299,11 +344,19 @@ export class RechargeOrdersService {
           entityId: rejectedOrder.id,
           summary: '主管駁回房卡購買核帳',
           metadata: {
-            playerId: rejectedOrder.playerId,
-            amount: rejectedOrder.amount,
-            roomCardAmount: rejectedOrder.roomCardAmount,
-            status: rejectedOrder.status,
-            reviewNote: rejectedOrder.reviewNote,
+            before: {
+              playerId: order.playerId,
+              amount: order.amount,
+              roomCardAmount: order.roomCardAmount,
+              status: order.status,
+            },
+            after: {
+              playerId: rejectedOrder.playerId,
+              amount: rejectedOrder.amount,
+              roomCardAmount: rejectedOrder.roomCardAmount,
+              status: rejectedOrder.status,
+              reviewNote: rejectedOrder.reviewNote,
+            },
           },
           adminUserId: adminId,
           playerId: rejectedOrder.playerId,
@@ -373,14 +426,20 @@ const MOCK_RECHARGE_ORDERS: MockRechargeOrder[] = [
 
 let mockRechargeOrderSequence = MOCK_RECHARGE_ORDERS.length;
 
-function filterMockRechargeOrders(options: { status?: string; take: number }) {
+function filterMockRechargeOrders(options: { status?: string; playerId?: string; take: number }) {
   const normalizedStatus = options.status?.toLowerCase();
+  const normalizedPlayerId = options.playerId?.trim();
 
-  const result = normalizedStatus
-    ? MOCK_RECHARGE_ORDERS.filter(
-        (order) => order.status.toLowerCase() === normalizedStatus,
-      )
-    : MOCK_RECHARGE_ORDERS;
+  const result = MOCK_RECHARGE_ORDERS.filter((order) => {
+    const matchesStatus = normalizedStatus
+      ? order.status.toLowerCase() === normalizedStatus
+      : true;
+    const matchesPlayerId = normalizedPlayerId
+      ? order.playerId === normalizedPlayerId
+      : true;
+
+    return matchesStatus && matchesPlayerId;
+  });
 
   return result
     .slice()

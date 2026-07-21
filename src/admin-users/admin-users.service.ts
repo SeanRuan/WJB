@@ -72,6 +72,11 @@ export class AdminUsersService {
   }
 
   async createAdminUser(dto: CreateAdminUserDto, actorAdminId: string) {
+    const reason = String(dto.reason || '').trim();
+    if (!reason) {
+      throw new BadRequestException('建立管理員需填寫原因');
+    }
+
     if (process.env.DATA_SOURCE === 'mock') {
       const existingAdmin = listMockAdminUsers().find(
         (admin) => admin.email.toLowerCase() === dto.email.toLowerCase(),
@@ -89,10 +94,14 @@ export class AdminUsersService {
         entityId: newAdmin.id,
         summary: '建立後台管理員帳號',
         metadata: {
-          email: newAdmin.email,
-          displayName: newAdmin.displayName,
-          role: newAdmin.role,
-          isActive: newAdmin.isActive,
+          reason,
+          after: {
+            email: newAdmin.email,
+            displayName: newAdmin.displayName,
+            role: newAdmin.role,
+            isActive: newAdmin.isActive,
+            credentialSet: true,
+          },
         },
         adminUserId: actorAdminId,
       });
@@ -132,10 +141,14 @@ export class AdminUsersService {
       entityId: newAdmin.id,
       summary: '建立後台管理員帳號',
       metadata: {
-        email: newAdmin.email,
-        displayName: newAdmin.displayName,
-        role: newAdmin.role,
-        isActive: newAdmin.isActive,
+        reason,
+        after: {
+          email: newAdmin.email,
+          displayName: newAdmin.displayName,
+          role: newAdmin.role,
+          isActive: newAdmin.isActive,
+          credentialSet: true,
+        },
       },
       adminUserId: actorAdminId,
     });
@@ -143,8 +156,26 @@ export class AdminUsersService {
     return newAdmin;
   }
 
-  async disableAdminUser(targetAdminId: string, actorAdminId: string) {
+  async disableAdminUser(targetAdminId: string, actorAdminId: string, reasonInput: string) {
+    const reason = String(reasonInput || '').trim();
+    if (!reason) {
+      throw new BadRequestException('停用管理員需填寫原因');
+    }
+
+    if (targetAdminId === actorAdminId) {
+      throw new BadRequestException('不可停用目前登入帳號');
+    }
+
     if (process.env.DATA_SOURCE === 'mock') {
+      const targetAdmin = findMockAdminById(targetAdminId);
+      if (!targetAdmin) {
+        throw new NotFoundException(`Admin user ${targetAdminId} not found`);
+      }
+
+      if (!targetAdmin.isActive) {
+        throw new BadRequestException('該管理員已停用');
+      }
+
       const disabledAdmin = disableMockAdminUser(targetAdminId);
 
       if (!disabledAdmin) {
@@ -157,10 +188,19 @@ export class AdminUsersService {
         entityId: disabledAdmin.id,
         summary: '停用後台管理員帳號',
         metadata: {
-          email: disabledAdmin.email,
-          displayName: disabledAdmin.displayName,
-          role: disabledAdmin.role,
-          isActive: disabledAdmin.isActive,
+          reason,
+          before: {
+            email: targetAdmin.email,
+            displayName: targetAdmin.displayName,
+            role: targetAdmin.role,
+            isActive: targetAdmin.isActive,
+          },
+          after: {
+            email: disabledAdmin.email,
+            displayName: disabledAdmin.displayName,
+            role: disabledAdmin.role,
+            isActive: disabledAdmin.isActive,
+          },
         },
         adminUserId: actorAdminId,
       });
@@ -174,6 +214,10 @@ export class AdminUsersService {
 
     if (!targetAdmin) {
       throw new NotFoundException(`Admin user ${targetAdminId} not found`);
+    }
+
+    if (!targetAdmin.isActive) {
+      throw new BadRequestException('該管理員已停用');
     }
 
     const disabledAdmin = await this.prisma.adminUser.update({
@@ -196,10 +240,19 @@ export class AdminUsersService {
       entityId: disabledAdmin.id,
       summary: '停用後台管理員帳號',
       metadata: {
-        email: disabledAdmin.email,
-        displayName: disabledAdmin.displayName,
-        role: disabledAdmin.role,
-        isActive: disabledAdmin.isActive,
+        reason,
+        before: {
+          email: targetAdmin.email,
+          displayName: targetAdmin.displayName,
+          role: targetAdmin.role,
+          isActive: targetAdmin.isActive,
+        },
+        after: {
+          email: disabledAdmin.email,
+          displayName: disabledAdmin.displayName,
+          role: disabledAdmin.role,
+          isActive: disabledAdmin.isActive,
+        },
       },
       adminUserId: actorAdminId,
     });

@@ -30,6 +30,8 @@ model Player {
   externalId              String                   @unique
   nickname                String
   status                  String                   @default("active") // active | banned
+  note                    String?
+  tags                    String?
   coinBalance             BigInt                   @default(0) // 遊戲內免費籌碼餘額（唯讀同步自遊戲端）。本平台不販售遊戲幣，此欄位僅供顯示參考。
   createdAt               DateTime                 @default(now())
   updatedAt               DateTime                 @updatedAt

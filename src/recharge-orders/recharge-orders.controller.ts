@@ -27,10 +27,12 @@ export class RechargeOrdersController {
   @Get()
   getRechargeOrders(
     @Query('status') status?: string,
+    @Query('playerId') playerId?: string,
     @Query('take') take?: string,
   ) {
     return this.rechargeOrdersService.listRechargeOrders({
       status,
+      playerId,
       take: take ? Number(take) : undefined,
     });
   }

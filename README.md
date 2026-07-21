@@ -69,11 +69,18 @@ https://github.com/SeanRuan/WJB
 - [RELEASE_NOTES.md](RELEASE_NOTES.md)
 - [BRANCHING.md](BRANCHING.md)
 - [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md)
+- [docs/CORE_CS_SMOKE_RUNBOOK.zh-TW.md](docs/CORE_CS_SMOKE_RUNBOOK.zh-TW.md)
 
 ## Scripts
 
 - `npm run start:dev` 開發模式
 - `npm run build` 編譯專案
 - `npm run check` TypeScript 檢查
+- `npm run smoke:reset-mock-state` 清除 mock 測試狀態（.cache/mock-state）
 - `npm run prisma:generate` 產生 Prisma client
 - `npm run prisma:pull` 讀取 MSSQL schema
+- `npm run smoke:recharge-review` 核帳核心 smoke
+- `npm run smoke:admin-disable` 管理員停權核心 smoke
+- `npm run smoke:guild-member` 公會成員操作核心 smoke
+- `npm run smoke:guild-approval-review` 公會申請審核核心 smoke
+- `npm run smoke:core-cs` 一鍵執行全部核心客服 smoke

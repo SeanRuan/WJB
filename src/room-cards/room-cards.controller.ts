@@ -23,10 +23,12 @@ export class RoomCardsController {
   @Get('balances')
   getBalances(
     @Query('search') search?: string,
+    @Query('playerId') playerId?: string,
     @Query('take') take?: string,
   ) {
     return this.roomCardsService.listBalances({
       search,
+      playerId,
       take: take ? Number(take) : undefined,
     });
   }
@@ -39,7 +41,8 @@ export class RoomCardsController {
     @Query('take') take?: string,
   ) {
     return this.roomCardsService.listLogs({
-      search: search ?? playerId,
+      search,
+      playerId,
       sourceType,
       take: take ? Number(take) : undefined,
     });

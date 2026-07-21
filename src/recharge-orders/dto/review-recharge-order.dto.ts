@@ -1,8 +1,9 @@
-import { IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsString, Matches, MaxLength, MinLength } from 'class-validator';
 
 export class ReviewRechargeOrderDto {
-  @IsOptional()
   @IsString()
+  @MinLength(2)
   @MaxLength(500)
-  reviewNote?: string;
+  @Matches(/\S/, { message: 'reviewNote 不可為空白' })
+  reviewNote!: string;
 }

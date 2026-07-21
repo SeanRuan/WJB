@@ -26,6 +26,7 @@ type ListRequestsOptions = {
 type ListGuildsOptions = {
   status?: string;
   search?: string;
+  playerId?: string;
   take?: number;
 };
 
@@ -86,6 +87,34 @@ export class GuildApprovalsService {
     const requestType = parseRequestType(dto.requestType);
     validateRequestGuildId(requestType, dto.guildId);
 
+    if (process.env.DATA_SOURCE === 'mock') {
+      if (requestType !== 'create_guild') {
+        const guild = findMockGuildById(dto.guildId!);
+        if (!guild) {
+          throw new NotFoundException(`Guild ${dto.guildId} not found`);
+        }
+      }
+
+      validatePayload(requestType, dto.payload);
+
+      const created = createMockGuildApprovalRequest(requestType, dto.guildId, dto.payload, adminId);
+
+      await this.auditService.recordAuditLog({
+        action: 'SUBMIT_GUILD_APPROVAL_REQUEST',
+        entityName: 'GuildApprovalRequest',
+        entityId: created.id,
+        summary: `送出公會異動申請（${requestType}）`,
+        metadata: {
+          requestType,
+          guildId: created.guildId,
+          requestPayload: dto.payload,
+        },
+        adminUserId: adminId,
+      });
+
+      return created;
+    }
+
     if (requestType !== 'create_guild') {
       const guild = await this.prisma.guild.findUnique({
         where: { id: dto.guildId! },
@@ -116,6 +145,7 @@ export class GuildApprovalsService {
       metadata: {
         requestType,
         guildId: created.guildId,
+        requestPayload: dto.payload,
       },
       adminUserId: adminId,
     });
@@ -128,6 +158,32 @@ export class GuildApprovalsService {
     dto: ReviewGuildApprovalRequestDto,
     adminId: string,
   ) {
+    const reviewNote = String(dto.reviewNote || '').trim();
+    if (!reviewNote) {
+      throw new BadRequestException('公會申請審核需填寫原因');
+    }
+
+    if (process.env.DATA_SOURCE === 'mock') {
+      const approved = approveMockGuildApprovalRequest(id, reviewNote, adminId);
+      const requestPayload = parsePayload(approved.payload);
+
+      await this.auditService.recordAuditLog({
+        action: 'APPROVE_GUILD_APPROVAL_REQUEST',
+        entityName: 'GuildApprovalRequest',
+        entityId: approved.id,
+        summary: `核准公會異動申請（${approved.requestType}）`,
+        metadata: {
+          requestType: approved.requestType,
+          guildId: approved.guildId,
+          requestPayload,
+          reviewNote,
+        },
+        adminUserId: adminId,
+      });
+
+      return approved;
+    }
+
     return this.prisma.$transaction(async (tx) => {
       const request = await tx.guildApprovalRequest.findUnique({
         where: { id },
@@ -196,7 +252,7 @@ export class GuildApprovalsService {
           status: 'approved',
           guildId: appliedGuildId,
           reviewedByAdminId: adminId,
-          reviewNote: dto.reviewNote,
+          reviewNote,
           reviewedAt: new Date(),
         },
       });
@@ -210,7 +266,8 @@ export class GuildApprovalsService {
           metadata: {
             requestType,
             guildId: approved.guildId,
-            reviewNote: dto.reviewNote,
+            requestPayload: payload,
+            reviewNote,
           },
           adminUserId: adminId,
         },
@@ -226,6 +283,31 @@ export class GuildApprovalsService {
     dto: ReviewGuildApprovalRequestDto,
     adminId: string,
   ) {
+    const reviewNote = String(dto.reviewNote || '').trim();
+    if (!reviewNote) {
+      throw new BadRequestException('公會申請審核需填寫原因');
+    }
+
+    if (process.env.DATA_SOURCE === 'mock') {
+      const rejected = rejectMockGuildApprovalRequest(id, reviewNote, adminId);
+
+      await this.auditService.recordAuditLog({
+        action: 'REJECT_GUILD_APPROVAL_REQUEST',
+        entityName: 'GuildApprovalRequest',
+        entityId: rejected.id,
+        summary: `駁回公會異動申請（${rejected.requestType}）`,
+        metadata: {
+          requestType: rejected.requestType,
+          guildId: rejected.guildId,
+          requestPayload: parsePayload(rejected.payload),
+          reviewNote,
+        },
+        adminUserId: adminId,
+      });
+
+      return rejected;
+    }
+
     return this.prisma.$transaction(async (tx) => {
       const request = await tx.guildApprovalRequest.findUnique({
         where: { id },
@@ -244,7 +326,7 @@ export class GuildApprovalsService {
         data: {
           status: 'rejected',
           reviewedByAdminId: adminId,
-          reviewNote: dto.reviewNote,
+          reviewNote,
           reviewedAt: new Date(),
         },
       });
@@ -258,7 +340,8 @@ export class GuildApprovalsService {
           metadata: {
             requestType: request.requestType,
             guildId: request.guildId,
-            reviewNote: dto.reviewNote,
+            requestPayload: parsePayload(request.payload),
+            reviewNote,
           },
           adminUserId: adminId,
         },
@@ -273,15 +356,26 @@ export class GuildApprovalsService {
     const take = clampTake(options.take);
     const status = options.status?.trim();
     const search = options.search?.trim();
+    const playerId = options.playerId?.trim();
 
     if (process.env.DATA_SOURCE === 'mock') {
-      return filterMockGuilds({ status, search, take });
+      return filterMockGuilds({ status, search, playerId, take });
     }
 
     return this.prisma.guild.findMany({
       where: {
         ...(status ? { status } : {}),
         ...(search ? { name: { contains: search } } : {}),
+        ...(playerId
+          ? {
+              members: {
+                some: {
+                  playerId,
+                  status: 'active',
+                },
+              },
+            }
+          : {}),
       },
       orderBy: { createdAt: 'desc' },
       take,
@@ -362,6 +456,39 @@ export class GuildApprovalsService {
     adminId: string,
   ) {
     const role = dto.role ?? 'member';
+    const note = String(dto.note || '').trim();
+    if (!note) {
+      throw new BadRequestException('加入公會成員需填寫原因');
+    }
+
+    if (process.env.DATA_SOURCE === 'mock') {
+      const member = addMockGuildMember(guildId, dto.playerId, role, note, adminId);
+
+      await this.auditService.recordAuditLog({
+        action: 'ADD_GUILD_MEMBER',
+        entityName: 'GuildMember',
+        entityId: member.id,
+        summary: '客服新增或恢復公會成員',
+        metadata: {
+          guildId,
+          playerId: member.playerId,
+          before: member.audit.before,
+          after: member.audit.after,
+          note,
+        },
+        adminUserId: adminId,
+        playerId: member.playerId,
+      });
+
+      return {
+        id: member.id,
+        playerId: member.playerId,
+        role: member.role,
+        status: member.status,
+        joinedAt: member.joinedAt,
+        player: resolveMockPlayerSummary(member.playerId),
+      };
+    }
 
     return this.prisma.$transaction(async (tx) => {
       await ensureGuildActive(tx, guildId);
@@ -396,6 +523,20 @@ export class GuildApprovalsService {
         );
       }
 
+      const existingMembership = await tx.guildMember.findUnique({
+        where: {
+          guildId_playerId: {
+            guildId,
+            playerId: dto.playerId,
+          },
+        },
+        select: {
+          id: true,
+          role: true,
+          status: true,
+        },
+      });
+
       const member = await tx.guildMember.upsert({
         where: {
           guildId_playerId: {
@@ -429,8 +570,17 @@ export class GuildApprovalsService {
           metadata: {
             guildId,
             playerId: member.playerId,
-            role: member.role,
-            status: member.status,
+            before: existingMembership
+              ? {
+                  role: existingMembership.role,
+                  status: existingMembership.status,
+                }
+              : null,
+            after: {
+              role: member.role,
+              status: member.status,
+            },
+            note,
           },
           adminUserId: adminId,
           playerId: member.playerId,
@@ -448,6 +598,40 @@ export class GuildApprovalsService {
     dto: UpdateGuildMemberRoleDto,
     adminId: string,
   ) {
+    const note = String(dto.note || '').trim();
+    if (!note) {
+      throw new BadRequestException('調整公會成員角色需填寫原因');
+    }
+
+    if (process.env.DATA_SOURCE === 'mock') {
+      const updated = updateMockGuildMemberRole(guildId, memberId, dto.role, note, adminId);
+
+      await this.auditService.recordAuditLog({
+        action: 'UPDATE_GUILD_MEMBER_ROLE',
+        entityName: 'GuildMember',
+        entityId: updated.id,
+        summary: '客服調整公會成員角色',
+        metadata: {
+          guildId,
+          playerId: updated.playerId,
+          before: updated.audit.before,
+          after: updated.audit.after,
+          note,
+        },
+        adminUserId: adminId,
+        playerId: updated.playerId,
+      });
+
+      return {
+        id: updated.id,
+        playerId: updated.playerId,
+        role: updated.role,
+        status: updated.status,
+        joinedAt: updated.joinedAt,
+        player: resolveMockPlayerSummary(updated.playerId),
+      };
+    }
+
     return this.prisma.$transaction(async (tx) => {
       await ensureGuildActive(tx, guildId);
 
@@ -501,7 +685,15 @@ export class GuildApprovalsService {
           metadata: {
             guildId,
             playerId: updated.playerId,
-            role: updated.role,
+            before: {
+              role: existing.role,
+              status: existing.status,
+            },
+            after: {
+              role: updated.role,
+              status: updated.status,
+            },
+            note,
           },
           adminUserId: adminId,
           playerId: updated.playerId,
@@ -519,6 +711,40 @@ export class GuildApprovalsService {
     dto: RemoveGuildMemberDto,
     adminId: string,
   ) {
+    const note = String(dto.note || '').trim();
+    if (!note) {
+      throw new BadRequestException('移出公會成員需填寫原因');
+    }
+
+    if (process.env.DATA_SOURCE === 'mock') {
+      const removed = removeMockGuildMember(guildId, memberId, note, adminId);
+
+      await this.auditService.recordAuditLog({
+        action: 'REMOVE_GUILD_MEMBER',
+        entityName: 'GuildMember',
+        entityId: removed.id,
+        summary: '客服移出公會成員',
+        metadata: {
+          guildId,
+          playerId: removed.playerId,
+          before: removed.audit.before,
+          after: removed.audit.after,
+          note,
+        },
+        adminUserId: adminId,
+        playerId: removed.playerId,
+      });
+
+      return {
+        id: removed.id,
+        playerId: removed.playerId,
+        role: removed.role,
+        status: removed.status,
+        joinedAt: removed.joinedAt,
+        player: resolveMockPlayerSummary(removed.playerId),
+      };
+    }
+
     return this.prisma.$transaction(async (tx) => {
       await ensureGuildActive(tx, guildId);
 
@@ -561,8 +787,15 @@ export class GuildApprovalsService {
           metadata: {
             guildId,
             playerId: removed.playerId,
-            previousRole: existing.role,
-            note: dto.note,
+            before: {
+              role: existing.role,
+              status: existing.status,
+            },
+            after: {
+              role: removed.role,
+              status: removed.status,
+            },
+            note,
           },
           adminUserId: adminId,
           playerId: removed.playerId,
@@ -872,12 +1105,20 @@ function filterMockGuildApprovalRequests(options: {
 function filterMockGuilds(options: {
   status?: string;
   search?: string;
+  playerId?: string;
   take: number;
 }) {
   return MOCK_GUILDS
     .filter((guild) => (options.status ? guild.status === options.status : true))
     .filter((guild) =>
       options.search ? guild.name.toLowerCase().includes(options.search.toLowerCase()) : true,
+    )
+    .filter((guild) =>
+      options.playerId
+        ? guild.members.some(
+            (member) => member.playerId === options.playerId && member.status === 'active',
+          )
+        : true,
     )
     .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())
     .slice(0, options.take)
@@ -897,6 +1138,339 @@ function filterMockGuilds(options: {
         members: guild.members.filter((member) => member.status === 'active').length,
       },
     }));
+}
+
+function resolveMockPlayerSummary(playerId: string) {
+  const player = findMockPlayerById(playerId);
+  if (!player) {
+    return {
+      externalId: playerId,
+      nickname: playerId,
+      status: 'unknown',
+    };
+  }
+
+  return {
+    externalId: player.externalId,
+    nickname: player.nickname,
+    status: player.status,
+  };
+}
+
+function addMockGuildMember(
+  guildId: string,
+  playerId: string,
+  role: string,
+  note: string,
+  adminId: string,
+) {
+  const guild = MOCK_GUILDS.find((entry) => entry.id === guildId);
+  if (!guild) {
+    throw new NotFoundException(`Guild ${guildId} not found`);
+  }
+
+  if (guild.status !== 'active') {
+    throw new BadRequestException(`Guild ${guildId} is ${guild.status}`);
+  }
+
+  const player = findMockPlayerById(playerId);
+  if (!player) {
+    throw new NotFoundException(`Player ${playerId} not found`);
+  }
+
+  const activeMembershipInOtherGuild = MOCK_GUILDS
+    .filter((entry) => entry.id !== guildId)
+    .find((entry) => entry.members.some((member) => member.playerId === playerId && member.status === 'active'));
+
+  if (activeMembershipInOtherGuild) {
+    throw new BadRequestException(`Player is already active in guild ${activeMembershipInOtherGuild.name}`);
+  }
+
+  const existingMembership = guild.members.find((member) => member.playerId === playerId) ?? null;
+  const now = new Date();
+
+  if (existingMembership) {
+    const before = {
+      role: existingMembership.role,
+      status: existingMembership.status,
+    };
+
+    existingMembership.role = role;
+    existingMembership.status = 'active';
+    guild.updatedAt = now;
+
+    return {
+      id: existingMembership.id,
+      playerId: existingMembership.playerId,
+      role: existingMembership.role,
+      status: existingMembership.status,
+      joinedAt: existingMembership.joinedAt,
+      audit: {
+        before,
+        after: {
+          role: existingMembership.role,
+          status: existingMembership.status,
+        },
+        note,
+        adminId,
+      },
+    };
+  }
+
+  const nextSequence =
+    MOCK_GUILDS
+      .flatMap((entry) => entry.members)
+      .map((member) => Number((member.id.match(/(\d+)$/) || [])[1] || 0))
+      .reduce((max, value) => Math.max(max, value), 0) + 1;
+  const nextId = `mock_guild_member_${String(nextSequence).padStart(3, '0')}`;
+  const createdMember = {
+    id: nextId,
+    playerId,
+    role,
+    status: 'active',
+    joinedAt: now,
+  };
+
+  guild.members.push(createdMember);
+  guild.updatedAt = now;
+
+  return {
+    ...createdMember,
+    audit: {
+      before: null,
+      after: {
+        role: createdMember.role,
+        status: createdMember.status,
+      },
+      note,
+      adminId,
+    },
+  };
+}
+
+function updateMockGuildMemberRole(
+  guildId: string,
+  memberId: string,
+  role: string,
+  note: string,
+  adminId: string,
+) {
+  const guild = MOCK_GUILDS.find((entry) => entry.id === guildId);
+  if (!guild) {
+    throw new NotFoundException(`Guild ${guildId} not found`);
+  }
+
+  if (guild.status !== 'active') {
+    throw new BadRequestException(`Guild ${guildId} is ${guild.status}`);
+  }
+
+  const member = guild.members.find((entry) => entry.id === memberId);
+  if (!member) {
+    throw new NotFoundException(`Guild member ${memberId} not found`);
+  }
+
+  if (member.status !== 'active') {
+    throw new BadRequestException(`Guild member ${memberId} is already ${member.status}`);
+  }
+
+  const before = {
+    role: member.role,
+    status: member.status,
+  };
+
+  member.role = role;
+  guild.updatedAt = new Date();
+
+  return {
+    id: member.id,
+    guildId,
+    playerId: member.playerId,
+    role: member.role,
+    status: member.status,
+    joinedAt: member.joinedAt,
+    audit: {
+      before,
+      after: {
+        role: member.role,
+        status: member.status,
+      },
+      note,
+      adminId,
+    },
+  };
+}
+
+function removeMockGuildMember(
+  guildId: string,
+  memberId: string,
+  note: string,
+  adminId: string,
+) {
+  const guild = MOCK_GUILDS.find((entry) => entry.id === guildId);
+  if (!guild) {
+    throw new NotFoundException(`Guild ${guildId} not found`);
+  }
+
+  if (guild.status !== 'active') {
+    throw new BadRequestException(`Guild ${guildId} is ${guild.status}`);
+  }
+
+  const member = guild.members.find((entry) => entry.id === memberId);
+  if (!member) {
+    throw new NotFoundException(`Guild member ${memberId} not found`);
+  }
+
+  if (member.status === 'removed') {
+    throw new BadRequestException(`Guild member ${memberId} is already removed`);
+  }
+
+  const before = {
+    role: member.role,
+    status: member.status,
+  };
+
+  member.status = 'removed';
+  guild.updatedAt = new Date();
+
+  return {
+    id: member.id,
+    guildId,
+    playerId: member.playerId,
+    role: member.role,
+    status: member.status,
+    joinedAt: member.joinedAt,
+    audit: {
+      before,
+      after: {
+        role: member.role,
+        status: member.status,
+      },
+      note,
+      adminId,
+    },
+  };
+}
+
+function findMockGuildApprovalRequestOrThrow(id: string) {
+  const request = MOCK_GUILD_APPROVAL_REQUESTS.find((entry) => entry.id === id);
+  if (!request) {
+    throw new NotFoundException(`Guild approval request ${id} not found`);
+  }
+
+  if (request.status !== 'pending') {
+    throw new BadRequestException(`Request ${id} is already ${request.status}`);
+  }
+
+  return request;
+}
+
+function approveMockGuildApprovalRequest(id: string, reviewNote: string, adminId: string) {
+  const request = findMockGuildApprovalRequestOrThrow(id);
+  const requestType = parseRequestType(request.requestType);
+  const payload = parsePayload(request.payload);
+  let appliedGuildId = request.guildId;
+
+  if (requestType === 'create_guild') {
+    const createPayload = toCreatePayload(payload);
+    const now = new Date();
+    const nextId = `mock_guild_${String(MOCK_GUILDS.length + 1).padStart(3, '0')}`;
+
+    MOCK_GUILDS.push({
+      id: nextId,
+      name: createPayload.name,
+      status: 'active',
+      selfTouchReferenceRate: createPayload.selfTouchReferenceRate,
+      selfTouchReferenceVisible: createPayload.selfTouchReferenceVisible,
+      winReferenceRate: createPayload.winReferenceRate,
+      winReferenceVisible: createPayload.winReferenceVisible,
+      creationMethod: 'customer_service',
+      createdByAdminId: adminId,
+      createdAt: now,
+      updatedAt: now,
+      members: [],
+    });
+
+    appliedGuildId = nextId;
+  }
+
+  if (requestType === 'update_reference_rate') {
+    if (!request.guildId) {
+      throw new BadRequestException('guildId is required for update request');
+    }
+
+    const guild = MOCK_GUILDS.find((entry) => entry.id === request.guildId);
+    if (!guild) {
+      throw new NotFoundException(`Guild ${request.guildId} not found`);
+    }
+
+    const updatePayload = toUpdatePayload(payload);
+    if (Object.keys(updatePayload).length === 0) {
+      throw new BadRequestException('No update fields provided in payload');
+    }
+
+    Object.assign(guild, updatePayload, { updatedAt: new Date() });
+  }
+
+  if (requestType === 'revoke_guild') {
+    if (!request.guildId) {
+      throw new BadRequestException('guildId is required for revoke request');
+    }
+
+    const guild = MOCK_GUILDS.find((entry) => entry.id === request.guildId);
+    if (!guild) {
+      throw new NotFoundException(`Guild ${request.guildId} not found`);
+    }
+
+    guild.status = 'revoked';
+    guild.updatedAt = new Date();
+  }
+
+  request.status = 'approved';
+  request.guildId = appliedGuildId;
+  request.reviewedByAdminId = adminId;
+  request.reviewNote = reviewNote;
+  request.reviewedAt = new Date();
+
+  return request;
+}
+
+function rejectMockGuildApprovalRequest(id: string, reviewNote: string, adminId: string) {
+  const request = findMockGuildApprovalRequestOrThrow(id);
+  request.status = 'rejected';
+  request.reviewedByAdminId = adminId;
+  request.reviewNote = reviewNote;
+  request.reviewedAt = new Date();
+  return request;
+}
+
+function createMockGuildApprovalRequest(
+  requestType: RequestType,
+  guildId: string | undefined,
+  payload: Record<string, unknown>,
+  adminId: string,
+) {
+  const now = new Date();
+  const nextSequence =
+    MOCK_GUILD_APPROVAL_REQUESTS
+      .map((entry) => Number((entry.id.match(/(\d+)$/) || [])[1] || 0))
+      .reduce((max, value) => Math.max(max, value), 0) + 1;
+  const nextId = `mock_guild_request_${String(nextSequence).padStart(3, '0')}`;
+
+  const created: MockGuildApprovalRequest = {
+    id: nextId,
+    requestType,
+    guildId: requestType === 'create_guild' ? null : guildId ?? null,
+    payload: JSON.stringify(payload),
+    status: 'pending',
+    requestedByAdminId: adminId,
+    reviewedByAdminId: null,
+    reviewNote: null,
+    createdAt: now,
+    reviewedAt: null,
+  };
+
+  MOCK_GUILD_APPROVAL_REQUESTS.push(created);
+  return created;
 }
 
 function findMockGuildById(id: string) {
